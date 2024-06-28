@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<title>アイコンジェネレータ</title>
+<style type="text/css">
+img{
+	height: 1.5em;
+	width: 1.5em;
+}
+label{
+	white-space: nowrap;
+}
+table{
+	margin-top: 3rem;
+	border-collapse: collapse;
+}
+table:has(tbody:empty){
+	display: none;
+}
+th, td{
+	border: 1px solid gray;
+}
+th{
+	white-space: nowrap;
+}
+.area{
+	border: 1px solid green;
+	background: lightgreen;
+	padding: 10px;
+}
+.flex{
+	display: flex;
+	gap: 0.5ex 2em;
+	flex-direction: row;
+	flex-flow: wrap;
+}
+.a span{
+	color: blue;
+}
+</style>
+<script type="text/javascript">
+function getIconBlob(svgImage, sizeArray){
+	const p = Array.from(sizeArray, size => {
+		const canvas = Object.assign(document.createElement("canvas"), size);
+		const ctx = canvas.getContext("2d");
+		ctx.drawImage(svgImage, 0, 0, size, size);
+		const {promise, resolve, reject} = Promise.withResolvers();
+		canvas.toBlob(resolve);
+		return promise;
+	});
+	return Promise.all(p).then(iconData => {
+		let offset =  6 + 16 * sizeArray.length;
+		const iconDir = Array.from(sizeArray, (size, i) => {
+			const view = new DataView(new ArrayBuffer(16));
+			view.setUint8(0, size.width);
+			view.setUint8(1, size.height);
+			view.setInt8(2, 0);
+			view.setInt8(3, 0);
+			view.setInt16(4, 1, true);
+			view.setInt16(6, 0, true);
+			view.setInt32(8, iconData[i].size, true);
+			view.setInt32(12, offset, true);
+			offset += iconData[i].size;
+			return view.buffer;
+		});
+		const iconHeader = new DataView(new ArrayBuffer(6));
+		iconHeader.setInt16(0, 0, true);
+		iconHeader.setInt16(2, 1, true);
+		iconHeader.setInt16(4, sizeArray.length, true);
+
+		const blob = new Blob([
+			iconHeader.buffer,
+			...iconDir,
+			...iconData
+		], {type: "image/vnd.microsoft.icon"});
+		return Promise.resolve(blob);
+	});
+}
+document.addEventListener("DOMContentLoaded", function(){
+	const tbody = document.querySelector('tbody');
+	document.querySelector('input[type="file"]').addEventListener("change", e => {
+		const sizeArray = Array.from(document.querySelectorAll('input[type="checkbox"][data-width][data-height]:checked'), input => {
+			return {
+				width: Number(input.getAttribute("data-width")),
+				height: Number(input.getAttribute("data-height"))
+			};
+		});
+		for(let file of e.currentTarget.files){
+			const tr = document.createElement("tr");
+			const td1 = document.createElement("td");
+			const td2 = document.createElement("td");
+			const td3 = document.createElement("td");
+			const a = document.createElement("a");
+			const img = document.createElement("img");
+			const reader = new FileReader();
+			a.setAttribute("download", file.name.replace(/\.[^\.]+$/, ".ico"));
+			a.textContent = "ダウンロード";
+			img.addEventListener("load", e => {
+				getIconBlob(img, sizeArray).then(blob => {
+					const fileSize = Math.ceil(blob.size / 102.4) / 10;
+					a.textContent = `ダウンロード(${fileSize.toFixed(1)}KB)`;
+					a.setAttribute("href", URL.createObjectURL(blob));
+				});
+			});
+			img.setAttribute("crossorigin", "anonymous");
+			if((file.type.indexOf("svg") > 0) || (file.type.indexOf("xml") > 0)){
+				reader.addEventListener("load", e => {
+					img.setAttribute("src", `data:image/svg+xml;charset=utf8,${encodeURIComponent(e.target.result)}`);
+				});
+				reader.readAsText(file);
+			}else{
+				reader.addEventListener("load", e => {
+					img.setAttribute("src", e.target.result);
+				});
+				reader.readAsDataURL(file);
+			}
+			td1.appendChild(img);
+			td2.textContent = sizeArray.map(i => `${i.width}x${i.height}`).join(",\n");
+			td3.appendChild(a);
+			tr.appendChild(td1);
+			tr.appendChild(td2);
+			tr.appendChild(td3);
+			tbody.appendChild(tr);
+		}
+	});
+	document.querySelector('button[type="button"]').addEventListener("click", e => {
+		const size = {
+			width: Math.max(1, Math.min(256, Number(document.querySelector('input[name="width"]').value))),
+			height: Math.max(1, Math.min(256, Number(document.querySelector('input[name="height"]').value)))
+		};
+		const label = document.createElement("label");
+		const input = document.createElement("input");
+		const span = document.createElement("span");
+		input.setAttribute("type", "checkbox");
+		input.setAttribute("data-width", size.width);
+		input.setAttribute("data-height", size.height);
+		input.checked = true;
+		span.textContent = `${size.width}x${size.height}`;
+		label.appendChild(input);
+		label.appendChild(span);
+		document.querySelector('.size').appendChild(label);
+	});
+});
+</script>
+</head>
+<body>
+<div class="area">
+	<div class="flex size">
+		<label class="a"><input type="checkbox" data-width="16" data-height="16" checked /><span>16x16</span></label>
+		<label><input type="checkbox" data-width="20" data-height="20" checked /><span>20x20</span></label>
+		<label><input type="checkbox" data-width="24" data-height="24" checked /><span>24x24</span></label>
+		<label><input type="checkbox" data-width="30" data-height="30" checked /><span>30x30</span></label>
+		<label class="a"><input type="checkbox" data-width="32" data-height="32" checked /><span>32x32</span></label>
+		<label><input type="checkbox" data-width="36" data-height="36" checked /><span>36x36</span></label>
+		<label><input type="checkbox" data-width="40" data-height="40" checked /><span>40x40</span></label>
+		<label class="a"><input type="checkbox" data-width="48" data-height="48" checked /><span>48x48</span></label>
+		<label><input type="checkbox" data-width="60" data-height="60" checked /><span>60x60</span></label>
+		<label class="a"><input type="checkbox" data-width="64" data-height="64" checked /><span>64x64</span></label>
+		<label><input type="checkbox" data-width="72" data-height="72" checked /><span>72x72</span></label>
+		<label><input type="checkbox" data-width="80" data-height="80" checked /><span>80x80</span></label>
+		<label><input type="checkbox" data-width="96" data-height="96" checked /><span>96x96</span></label>
+		<label><input type="checkbox" data-width="128" data-height="128" checked /><span>128x128</span></label>
+		<label><input type="checkbox" data-width="256" data-height="256" checked /><span>256x256</span></label>
+	</div>
+	<div>
+		カスタムサイズ：
+		<input type="number" min="1" max="256" name="width" />x<input type="number" min="1" max="256" name="height" /><button type="button">追加</button>
+	</div>
+	<div>
+		画像：<input type="file" accept="image/*" multiple />
+	</div>
+</div>
+<table>
+	<thead><tr><th>画像</th><th>サイズ</th><th>ダウンロード</th></tr></thead>
+	<tbody></tbody>
+</table>
+</body>
+</html>
