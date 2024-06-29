@@ -5,8 +5,9 @@
 <title>アイコンジェネレータ</title>
 <style type="text/css">
 img{
-	height: 1.5em;
-	width: 1.5em;
+	height: 3em;
+	width: 3em;
+	object-fit: contain;
 }
 label{
 	white-space: nowrap;
@@ -44,7 +45,7 @@ function getIconBlob(svgImage, sizeArray){
 	const p = Array.from(sizeArray, size => {
 		const canvas = Object.assign(document.createElement("canvas"), size);
 		const ctx = canvas.getContext("2d");
-		ctx.drawImage(svgImage, 0, 0, size, size);
+		ctx.drawImage(svgImage, 0, 0, size.width, size.height);
 		const {promise, resolve, reject} = Promise.withResolvers();
 		canvas.toBlob(resolve);
 		return promise;
