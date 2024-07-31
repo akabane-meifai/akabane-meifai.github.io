@@ -76,6 +76,14 @@ html,body{
 	flex-grow: 1;
 	flex-direction: column;
 	overflow: auto;
+	padding: 3px;
+	gap: 5px;
+}
+#itemlist label,#itemlist label input[type="radio"]{
+	display: contents;
+}
+#itemlist label:has(input[type="radio"]:checked) div,#itemlist label:has(input[type="radio"]:checked) img{
+	box-shadow: 0 0 3px 3px blue;
 }
 #print canvas{
 	max-width: calc(100dvw - 3rem);
@@ -217,6 +225,8 @@ const imageObject = {
 		const div = document.createElement("div");
 		const item = document.createElement("div");
 		const ulid = "u" + this.generateULID();
+		const label = document.createElement("label");
+		const radio = document.createElement("input");
 		div.setAttribute("id", ulid);
 		div.textContent = text;
 		div.classList.add("a", "text");
@@ -237,10 +247,14 @@ const imageObject = {
 		this.ruleMap[ulid].style.setProperty("--range-contrast", "100%");
 		this.ruleMap[ulid].style.setProperty("--range-blur", "0px");
 		this.currentItem = {ulid: ulid, type: "text"};
-		item.setAttribute("data-id", ulid);
+		radio.setAttribute("type", "radio");
+		radio.setAttribute("name", "item");
+		label.setAttribute("data-id", ulid);
 		item.setAttribute("title", text);
 		item.textContent = text;
-		this.itemlist.appendChild(item);
+		label.appendChild(radio);
+		label.appendChild(item);
+		this.itemlist.appendChild(label);
 		this.setTool();
 	},
 	basedDT: Date.now() - performance.now(),
@@ -285,7 +299,10 @@ const imageObject = {
 		return promise;
 	},
 	setTool(){
-		console.log(this.currentItem);
+		if(this.currentItem.ulid == null){
+		}else{
+			document.querySelector(`label[data-id="${this.currentItem.ulid}"] input[type="radio"]`).checked = true;
+		}
 	},
 	handleEvent(e){
 		if(e.currentTarget == this.reader){
@@ -303,6 +320,8 @@ const imageObject = {
 			const img = e.currentTarget;
 			const item = document.createElement('img');
 			const ulid = img.getAttribute("id");
+			const label = document.createElement("label");
+			const radio = document.createElement("input");
 			let input = null;
 			this.ruleMap[ulid].style.setProperty("--item-x", `${img.width / 2}px`);
 			this.ruleMap[ulid].style.setProperty("--item-y", `${img.height / 2}px`);
@@ -342,9 +361,13 @@ const imageObject = {
 			input = document.querySelector('[data-range="y"]');
 			input.setAttribute("min", `-${img.height / 2 - 20}`);
 			input.setAttribute("max", `${img.height / 2 + 20}`);
-			item.setAttribute("data-id", ulid);
+			radio.setAttribute("type", "radio");
+			radio.setAttribute("name", "item");
+			label.setAttribute("data-id", ulid);
 			item.setAttribute("src", img.getAttribute("src"));
-			this.itemlist.appendChild(item);
+			label.appendChild(radio);
+			label.appendChild(item);
+			this.itemlist.appendChild(label);
 			this.setTool();
 		}else if(e.currentTarget == this.content){
 			const ulid = e.target.getAttribute("id");
@@ -367,6 +390,20 @@ const input = document.querySelector('input[type="file"]');
 input.addEventListener("change", e=> {
 	if(input.files.length > 0){
 		imageObject.addImage(input.files[0]);
+	}
+});
+imageObject.itemlist.addEventListener("change", e => {
+	const ulid = document.querySelector(`label[data-id]:has(input[type="radio"]:checked)`).getAttribute("data-id");
+	if(ulid in imageObject.ruleMap){
+		imageObject.currentItem = {ulid: ulid, type: "text"};
+		if(ulid == imageObject.baseImage){
+			imageObject.currentItem.type = "baseImage";
+		}else if(e.target.tagName == "IMG"){
+			imageObject.currentItem.type = "image";
+		}else if(e.target.tagName == "DIV"){
+			imageObject.currentItem.type = "text";
+		}
+		imageObject.setTool();
 	}
 });
 document.getElementById("append").addEventListener("change", e => {
