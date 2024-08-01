@@ -246,6 +246,12 @@ const imageObject = {
 		this.ruleMap[ulid].style.setProperty("--range-a", "0%");
 		this.ruleMap[ulid].style.setProperty("--range-contrast", "100%");
 		this.ruleMap[ulid].style.setProperty("--range-blur", "0px");
+		Object.assign(this.ruleMap[ulid].style, {
+			fontFamily: "serif",
+			lineHeight: "1",
+			padding: "0em",
+			radius: "0em"
+		});
 		this.currentItem = {ulid: ulid, type: "text"};
 		radio.setAttribute("type", "radio");
 		radio.setAttribute("name", "item");
@@ -300,8 +306,41 @@ const imageObject = {
 	},
 	setTool(){
 		if(this.currentItem.ulid == null){
+			return;
 		}else{
 			document.querySelector(`label[data-id="${this.currentItem.ulid}"] input[type="radio"]`).checked = true;
+		}
+		const style = this.ruleMap[this.currentItem.ulid].style;
+		let val;
+		val = style.getPropertyValue("--range-x").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="x"]').value = val;
+		val = style.getPropertyValue("--range-y").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="y"]').value = val;
+		val = style.getPropertyValue("--range-scale");
+		document.querySelector('[data-range="scale"]').value = val;
+		val = style.getPropertyValue("--range-rotate").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="rotate"]').value = val;
+		val = style.getPropertyValue("--range-h").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="h"]').value = val;
+		val = style.getPropertyValue("--range-s").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="s"]').value = val;
+		val = style.getPropertyValue("--range-l").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="l"]').value = val;
+		val = style.getPropertyValue("--range-a").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="a"]').value = val;
+		val = style.getPropertyValue("--range-contrast").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="contrast"]').value = val;
+		val = style.getPropertyValue("--range-blur").replace(/[^0-9]+$/, "");
+		document.querySelector('[data-range="blur"]').value = val;
+		if(this.currentItem.type == "text"){
+			val = style.fontFamily;
+			document.querySelector('[data-range="font"]').value = val;
+			val = style.lineHeight;
+			document.querySelector('[data-range="line"]').value = val;
+			val = style.padding.replace(/[^0-9]+$/, "");
+			document.querySelector('[data-range="padding"]').value = val;
+			val = style.radius.replace(/[^0-9]+$/, "");
+			document.querySelector('[data-range="radius"]').value = val;
 		}
 	},
 	handleEvent(e){
