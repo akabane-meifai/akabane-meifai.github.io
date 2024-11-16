@@ -1,0 +1,38 @@
+{
+    "name": "青鉛筆",
+    "short_name": "青鉛筆",
+    "description": "シンプルな画像エディタ",
+    "start_url": "/GreenPencil/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#00aa33",
+    "icons": [
+        {
+            "src": "icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
+        }
+    ],
+    "screenshots": [
+        {
+            "src": "screenshot1.png",
+            "sizes": "1920x1080",
+            "type": "image/png",
+            "form_factor": "wide",
+            "label": "Desktop Home Screen"
+        },
+        {
+            "src": "screenshot2.png",
+            "sizes": "1080x1920",
+            "type": "image/png",
+            "form_factor": "narrow",
+            "label": "Mobile Home Screen"
+        }
+    ],
+    "protocol_handlers": [
+        {
+            "protocol": "web+gpapp1",
+            "url": "/GreenPencil/?q=%s"
+        }
+    ]
+}
