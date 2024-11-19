@@ -2,6 +2,7 @@
     "name": "青鉛筆",
     "short_name": "青鉛筆",
     "description": "シンプルな画像エディタ",
+    "scope": "/GreenPencil/",
     "start_url": "/GreenPencil/",
     "display": "standalone",
     "background_color": "#ffffff",
