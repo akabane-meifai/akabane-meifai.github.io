@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FS Editor</title>
+    <!-- CodeMirror CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        main {
+            overflow: hidden;
+        }
+        main img {
+            max-height: 100%;
+        }
+        .CodeMirror {
+            height: 100%;
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+        }
+        #sidebar {
+            width: 300px;
+        }
+        .tree-item:hover .action-btns {
+            display: flex;
+        }
+        .active-file {
+            background-color: rgba(59, 130, 246, 0.4);
+        }
+        .dirty::after {
+            content: '*';
+            color: #fbbf24;
+            margin-left: 4px;
+            font-weight: bold;
+        }
+        .folder-toggle::before {
+            content: '▶';
+            display: inline-block;
+            margin-right: 6px;
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        .folder-toggle.open::before {
+            transform: rotate(90deg);
+        }
+        .category-header::before {
+            content: '▶';
+            display: inline-block;
+            margin-right: 8px;
+            font-size: 0.7rem;
+            transition: transform 0.2s;
+        }
+        .category-header.open::before {
+            transform: rotate(90deg);
+        }
+        .snippet-container {
+            display: none;
+        }
+        .snippet-container.open {
+            display: block;
+        }
+        .indent-line {
+            border-left: 1px solid rgba(255,255,255,0.1);
+        }
+        .create-type-btn.active {
+            background-color: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-gray-800 border-b border-gray-700 p-2 flex items-center justify-between">
+        <div class="flex items-center space-x-4">
+            <h1 class="text-lg font-bold ml-2 text-blue-400">FS Editor</h1>
+            <button id="btn-open-dir" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm">
+                ディレクトリを開く
+            </button>
+            <button id="btn-restore-dir" class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm hidden">
+                復元
+            </button>
+            <button id="btn-save" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm opacity-50 cursor-not-allowed" disabled>
+                保存 (Ctrl+S)
+            </button>
+        </div>
+        <div id="current-file-path" class="text-xs text-gray-400 italic px-4 truncate max-w-md">ファイルを選択してください</div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- Sidebar -->
+        <aside id="sidebar" class="bg-gray-800 border-r border-gray-700 flex flex-col">
+            <div class="flex border-b border-gray-700">
+                <button id="tab-files" class="flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500">ファイル</button>
+                <button id="tab-snippets" class="flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white">スニペット</button>
+            </div>
+            
+            <!-- File Tree Container -->
+            <div id="file-list-container" class="flex-1 overflow-y-auto p-2">
+                <div class="flex items-center justify-between px-2 mb-2">
+                    <span class="text-xs font-semibold text-gray-500 uppercase">エクスプローラー</span>
+                </div>
+                <div id="file-tree" class="text-sm select-none"></div>
+            </div>
+
+            <!-- Snippet List Container -->
+            <div id="snippet-list-container" class="hidden flex-1 overflow-y-auto p-2">
+                <div id="snippet-label" class="text-xs font-semibold text-gray-500 uppercase mb-4 px-2">カテゴリ別スニペット</div>
+                <div id="snippet-categories" class="space-y-2"></div>
+            </div>
+        </aside>
+
+        <!-- Editor Area -->
+        <main class="flex-1 relative">
+            <textarea id="editor-textarea"></textarea>
+            <img id="view-image" alt="preview">
+        </main>
+    </div>
+
+    <!-- Modal for New File/Folder -->
+    <div id="modal-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-80 border border-gray-700">
+            <h2 id="modal-title" class="text-lg font-bold mb-4">新規作成</h2>
+            
+            <div class="flex mb-4 bg-gray-900 rounded p-1">
+                <button id="type-file" class="create-type-btn flex-1 py-1 text-xs rounded transition-colors active">ファイル</button>
+                <button id="type-folder" class="create-type-btn flex-1 py-1 text-xs rounded transition-colors text-gray-400">フォルダ</button>
+            </div>
+
+            <div id="target-folder-display" class="text-xs text-blue-400 mb-2 truncate"></div>
+            
+            <input type="text" id="new-item-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-4 text-white focus:outline-none focus:border-blue-500" placeholder="名前を入力...">
+            
+            <div class="flex justify-end space-x-3">
+                <button id="btn-cancel-modal" class="text-gray-400 hover:text-white text-sm px-2">キャンセル</button>
+                <button id="btn-confirm-modal" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold">作成</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CodeMirror & Modes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/javascript/javascript.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/css/css.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/markdown/markdown.min.js"></script>
+
+    <script>
+        const SNIPPETS_FILENAME = 'snippets.txt';
+        const DEFAULT_SNIPPETS = `カテゴリ別スニペット\n\n## Common\n\n### Console Log\nconsole.log('');\n`;
+        const DB_NAME = 'FSEditorDB';
+        const STORE_NAME = 'handles';
+
+        // IndexedDB
+        async function openDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(DB_NAME, 1);
+                request.onupgradeneeded = () => request.result.createObjectStore(STORE_NAME);
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+            });
+        }
+
+        async function saveHandle(handle) {
+            const db = await openDB();
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            tx.objectStore(STORE_NAME).put(handle, 'rootDirectory');
+        }
+
+        async function getHandle() {
+            const db = await openDB();
+            return new Promise((resolve) => {
+                const request = db.transaction(STORE_NAME).objectStore(STORE_NAME).get('rootDirectory');
+                request.onsuccess = () => resolve(request.result);
+            });
+        }
+
+        /**
+         * App State
+         */
+        const state = {
+            editor: null,
+            rootHandle: null,
+            files: new Map(), // path -> { handle, doc, isDirty }
+            folders: new Map(), // path -> handle
+            expandedFolders: new Set(['/']),
+            activeFilePath: null,
+            targetFolder: '/', // For new item creation
+            createType: 'file' // 'file' or 'folder'
+        };
+
+        const DOM = {
+            btnOpenDir: document.getElementById('btn-open-dir'),
+            btnRestoreDir: document.getElementById('btn-restore-dir'),
+            btnSave: document.getElementById('btn-save'),
+            fileTree: document.getElementById('file-tree'),
+            snippetLabel: document.getElementById('snippet-label'),
+            snippetCategories: document.getElementById('snippet-categories'),
+            tabFiles: document.getElementById('tab-files'),
+            tabSnippets: document.getElementById('tab-snippets'),
+            containerFiles: document.getElementById('file-list-container'),
+            containerSnippets: document.getElementById('snippet-list-container'),
+            pathDisplay: document.getElementById('current-file-path'),
+            modal: document.getElementById('modal-overlay'),
+            targetFolderDisplay: document.getElementById('target-folder-display'),
+            btnCancelModal: document.getElementById('btn-cancel-modal'),
+            btnConfirmModal: document.getElementById('btn-confirm-modal'),
+            inputNewItemName: document.getElementById('new-item-name'),
+            typeFile: document.getElementById('type-file'),
+            typeFolder: document.getElementById('type-folder'),
+            viewImage: document.getElementById('view-image')
+        };
+
+        /**
+         * Initialize Editor
+         */
+        function initEditor() {
+            state.editor = CodeMirror.fromTextArea(document.getElementById('editor-textarea'), {
+                lineNumbers: true,
+                theme: 'dracula',
+                mode: 'javascript',
+                indentUnit: 2,
+                lineWrapping: true,
+                extraKeys: {
+                    "Tab": (cm) => {
+                        if (cm.somethingSelected()) cm.execCommand("indentMore");
+                        else cm.replaceSelection("  ");
+                    },
+                    "Ctrl-S": saveCurrentFile,
+                    "Cmd-S": saveCurrentFile
+                }
+            });
+
+            state.editor.on('change', () => {
+                if (state.activeFilePath) {
+                    const fileData = state.files.get(state.activeFilePath);
+                    const fileType = getTypeByExtension(state.activeFilePath);
+                    if (fileData && !fileType.binary && !fileData.doc.isClean()) {
+                        if (!fileData.isDirty) {
+                            fileData.isDirty = true;
+                            renderFileTree();
+                        }
+                    }
+                }
+            });
+
+            // 貼り付けイベントのカスタマイズ
+            state.editor.on('paste', function(cmInstance, event) {
+                const cursor = cmInstance.getCursor();
+                const indentMatch = cmInstance.getLine(cursor.line).match(/^\s*/);
+                if (indentMatch) {
+                    const text = event.clipboardData.getData("text/plain");
+                    const lines = text.replaceAll(/\r\n?/g, "\n").split('\n');
+                    if (text.split('\n').length > 1) {
+                        event.preventDefault();
+                        const indent = indentMatch[0];
+                        const formatted = lines.join('\n' + indent);
+                        cmInstance.replaceRange(formatted, cursor);
+                    }
+                }
+            });
+        }
+
+        function getTypeByExtension(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            switch (ext) {
+                case 'js':
+                    return {
+                        binary: false,
+                        mode: 'javascript'
+                    };
+                case 'css':
+                    return {
+                        binary: false,
+                        mode: 'css'
+                    };
+                case 'json':
+                    return {
+                        binary: false,
+                        mode: { name: "javascript", json: true }
+                    };
+                case 'html':
+                case 'htm':
+                    return {
+                        binary: false,
+                        mode: 'htmlmixed'
+                    };
+                case 'md':
+                    return {
+                        binary: false,
+                        mode: 'markdown'
+                    };
+                case 'webp':
+                case 'jpg':
+                case 'jpeg':
+                case 'png':
+                case 'gif':
+                    return {
+                        binary: true,
+                        mode: null,
+                        view: 'image'
+                    };
+                default:
+                    return {
+                        binary: false,
+                        mode: 'text/plain'
+                    };
+            }
+        }
+
+        /**
+         * Snippet Logic
+         */
+        function getContents(text, level = 1) {
+            const re = new RegExp("\\n[ \\t\\r\\f\\v]*#{" + level + "} ", 'g');
+            const tokens = ("\n" + text).split(re);
+            const intro = (tokens.shift() + "\n").split(/\n[ \t\r\f\v]*([\-\*_])([ \t]*)(?:\1\2)+\1[ \t\r\f\v]*\n/g).filter((_, i) => (i % 4 == 0) || (i % 4 == 3));
+            const last = intro.length - 1;
+            intro[0] = intro[0].replace(/^\n/, '');
+            if (intro[last]) intro[last] = intro[last].replace(/\n$/, '');
+            if ((last == 0) && (intro[0] === '')) intro.pop();
+            return intro.concat(tokens.map(sec => {
+                const pos = sec.indexOf("\n");
+                if (pos < 0) return {title: sec, content: []};
+                return {title: sec.slice(0, pos), content: getContents(sec.slice(pos + 1), level + 1)}
+            }));
+        }
+
+        async function updateSnippetUI() {
+            const snippetsPath = '/' + SNIPPETS_FILENAME;
+            const fileData = state.files.get(snippetsPath);
+            if (!fileData) return;
+
+            try {
+                const file = await fileData.handle.getFile();
+                const content = await file.text();
+                const snippets = getContents(content, 2);
+                
+                DOM.snippetCategories.innerHTML = '';
+                for (let category of snippets) {
+                    if (typeof category === 'string') {
+                        DOM.snippetLabel.textContent = category.trim();
+                        continue;
+                    }
+                    const catWrapper = document.createElement('div');
+                    const header = document.createElement('div');
+                    header.className = 'category-header text-sm font-semibold text-gray-400 hover:text-white cursor-pointer px-2 py-1 bg-gray-700/30 rounded flex items-center';
+                    header.textContent = category.title.trim();
+                    
+                    const itemContainer = document.createElement('ul');
+                    itemContainer.className = 'snippet-container space-y-1 p-2 ml-2 border-l border-gray-700';
+
+                    header.onclick = () => {
+                        header.classList.toggle('open');
+                        itemContainer.classList.toggle('open');
+                    };
+
+                    for (let snippet of category.content) {
+                        if (typeof snippet === 'string') continue;
+                        for (let alt of snippet.content) {
+                            const code = (typeof alt === 'string') ? alt : alt.toString();
+                            const li = document.createElement('li');
+                            li.className = 'p-1.5 bg-gray-700/50 rounded cursor-pointer hover:bg-gray-600 text-xs truncate border border-transparent hover:border-blue-500';
+                            li.textContent = snippet.title.trim();
+                            li.onclick = () => {
+                                const doc = state.editor.getDoc();
+                                const cursor = doc.getCursor();
+                                const currentLine = doc.getLine(cursor.line);
+                                const indent = (currentLine.match(/^\s*/) || [""])[0];
+                                doc.replaceRange(code.replaceAll("\n", "\n" + indent), cursor);
+                                state.editor.focus();
+                            };
+                            itemContainer.appendChild(li);
+                        }
+                    }
+                    catWrapper.append(header, itemContainer);
+                    DOM.snippetCategories.append(catWrapper);
+                }
+            } catch (err) {
+                DOM.snippetCategories.innerHTML = '<div class="text-red-400 text-xs p-2">snippets.txt 読み込みエラー</div>';
+            }
+        }
+
+        /**
+         * FS Recursive Operations
+         */
+        async function scanDirectory(handle, path = '/') {
+            state.folders.set(path, handle);
+            for await (const entry of handle.values()) {
+                const entryPath = path + (path === '/' ? '' : '/') + entry.name;
+                if (entry.kind === 'file') {
+                    if (!state.files.has(entryPath)) {
+                        state.files.set(entryPath, { handle: entry, doc: null, data: null, isDirty: false });
+                    }
+                } else if (entry.kind === 'directory') {
+                    await scanDirectory(entry, entryPath);
+                }
+            }
+        }
+
+        async function loadDirectory(handle) {
+            state.rootHandle = handle;
+            state.files.clear();
+            state.folders.clear();
+            DOM.btnRestoreDir.classList.add('hidden');
+            
+            await scanDirectory(handle);
+            
+            const snippetsPath = '/' + SNIPPETS_FILENAME;
+            if (!state.files.has(snippetsPath)) {
+                try {
+                    const sHandle = await handle.getFileHandle(SNIPPETS_FILENAME, { create: true });
+                    const writable = await sHandle.createWritable();
+                    await writable.write(DEFAULT_SNIPPETS);
+                    await writable.close();
+                    state.files.set(snippetsPath, { handle: sHandle, doc: null, data: null, isDirty: false });
+                } catch(e) {}
+            }
+
+            renderFileTree();
+            updateSnippetUI();
+        }
+
+        function renderFileTree() {
+            DOM.fileTree.innerHTML = '';
+            if (!state.rootHandle) return;
+            
+            const tree = { '/': { name: state.rootHandle.name, kind: 'directory', path: '/', children: [] } };
+            const allPaths = [...state.folders.keys(), ...state.files.keys()].filter(p => p !== '/');
+            allPaths.sort();
+
+            const createNode = (path) => {
+                const parts = path.split('/').filter(Boolean);
+                const name = parts[parts.length - 1];
+                const kind = state.folders.has(path) ? 'directory' : 'file';
+                return { name, kind, path, children: [] };
+            };
+
+            const structure = new Map();
+            structure.set('/', tree['/']);
+
+            allPaths.forEach(path => {
+                const node = createNode(path);
+                structure.set(path, node);
+                const parentPath = path.substring(0, path.lastIndexOf('/')) || '/';
+                const parent = structure.get(parentPath);
+                if (parent) parent.children.push(node);
+            });
+
+            const renderNode = (node, depth = 0) => {
+                const container = document.createElement('div');
+                const item = document.createElement('div');
+                const isFolder = node.kind === 'directory';
+                const isExpanded = state.expandedFolders.has(node.path);
+                
+                item.className = `tree-item group flex items-center justify-between py-1 px-2 rounded cursor-pointer hover:bg-gray-700/50 ${state.activeFilePath === node.path ? 'active-file' : ''}`;
+                item.style.paddingLeft = `${depth * 12 + 8}px`;
+
+                const labelWrapper = document.createElement('div');
+                labelWrapper.className = 'flex items-center truncate flex-1';
+
+                if (isFolder) {
+                    const toggle = document.createElement('span');
+                    toggle.className = `folder-toggle ${isExpanded ? 'open' : ''}`;
+                    labelWrapper.appendChild(toggle);
+                    
+                    const folderIcon = document.createElement('span');
+                    folderIcon.className = 'mr-2 text-yellow-500 opacity-70';
+                    folderIcon.innerHTML = `<svg class="w-4 h-4 inline" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>`;
+                    labelWrapper.appendChild(folderIcon);
+                } else {
+                    const fileIcon = document.createElement('span');
+                    fileIcon.className = 'ml-4 mr-2 text-gray-400 opacity-60';
+                    fileIcon.innerHTML = `<svg class="w-3.5 h-3.5 inline" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4z" clip-rule="evenodd"></path></svg>`;
+                    labelWrapper.appendChild(fileIcon);
+                }
+
+                const nameSpan = document.createElement('span');
+                nameSpan.textContent = node.name;
+                nameSpan.className = `truncate ${node.path === '/' + SNIPPETS_FILENAME ? 'text-blue-400 font-medium' : ''} ${state.files.get(node.path)?.isDirty ? 'dirty' : ''}`;
+                labelWrapper.appendChild(nameSpan);
+                item.appendChild(labelWrapper);
+
+                const actions = document.createElement('div');
+                actions.className = 'action-btns hidden space-x-1 ml-2';
+                
+                if (isFolder) {
+                    const addBtn = document.createElement('button');
+                    addBtn.innerHTML = '+';
+                    addBtn.className = 'text-xs bg-blue-900/50 hover:bg-blue-600 px-1.5 rounded leading-none py-0.5';
+                    addBtn.title = 'フォルダ内に作成';
+                    addBtn.onclick = (e) => { e.stopPropagation(); showModal(node.path); };
+                    actions.appendChild(addBtn);
+                }
+
+                if (node.path !== '/' && node.path !== '/' + SNIPPETS_FILENAME) {
+                    const delBtn = document.createElement('button');
+                    delBtn.innerHTML = '×';
+                    delBtn.className = 'text-xs bg-red-900/50 hover:bg-red-600 px-1.5 rounded leading-none py-0.5';
+                    delBtn.onclick = (e) => { e.stopPropagation(); deleteEntry(node); };
+                    actions.appendChild(delBtn);
+                }
+                item.appendChild(actions);
+
+                item.onclick = () => {
+                    if (isFolder) {
+                        if (state.expandedFolders.has(node.path)) state.expandedFolders.delete(node.path);
+                        else state.expandedFolders.add(node.path);
+                        renderFileTree();
+                    } else {
+                        openFile(node.path);
+                    }
+                };
+
+                container.appendChild(item);
+
+                if (isFolder && isExpanded) {
+                    const childrenContainer = document.createElement('div');
+                    const childrenFragment = document.createDocumentFragment();
+                    childrenContainer.className = 'indent-line';
+                    node.children.sort((a, b) => {
+                        if (a.kind !== b.kind) return a.kind === 'directory' ? -1 : 1;
+                        return a.name.localeCompare(b.name);
+                    }).forEach(child => {
+                        if (child.path === '/' + SNIPPETS_FILENAME) {
+                            childrenFragment.appendChild(renderNode(child, depth + 1));
+                        } else {
+                            childrenContainer.appendChild(renderNode(child, depth + 1));
+                        }
+                    });
+                    childrenContainer.appendChild(childrenFragment);
+                    container.appendChild(childrenContainer);
+                }
+
+                return container;
+            };
+
+            DOM.fileTree.appendChild(renderNode(tree['/']));
+        }
+
+        async function openFile(path) {
+            const fileData = state.files.get(path);
+            if (!fileData) return;
+
+            const fileType = getTypeByExtension(path);
+            if (!fileData.doc) {
+                const file = await fileData.handle.getFile();
+                if (typeof fileType.mode === 'string') {
+                    const text = await file.text();
+                    fileData.doc = CodeMirror.Doc(text, fileType.mode);
+                } else if (fileType.view === 'image') {
+                    const url = URL.createObjectURL(file);
+                    fileData.data = {url};
+                    fileData.doc = CodeMirror.Doc('', 'text/plain');
+                } else {
+                    fileData.doc = CodeMirror.Doc('', 'text/plain');
+                }
+            }
+
+            if (typeof fileType.mode === 'string') {
+               state.editor.display.wrapper.hidden = false;
+               DOM.viewImage.removeAttribute('src');
+            } else if (fileType.view === 'image') {
+               state.editor.display.wrapper.hidden = true;
+               DOM.viewImage.setAttribute('src', fileData.data.url);
+            } else {
+               state.editor.display.wrapper.hidden = false;
+               DOM.viewImage.removeAttribute('src');
+            }
+            state.editor.swapDoc(fileData.doc);
+            state.activeFilePath = path;
+            DOM.pathDisplay.textContent = path;
+            DOM.btnSave.disabled = false;
+            DOM.btnSave.classList.remove('opacity-50', 'cursor-not-allowed');
+            renderFileTree();
+        }
+
+        async function saveCurrentFile() {
+            if (!state.activeFilePath) return;
+            const fileData = state.files.get(state.activeFilePath);
+            const fileType = getTypeByExtension(state.activeFilePath);
+            
+            try {
+                const writable = await fileData.handle.createWritable();
+                await writable.write(state.editor.getValue());
+                await writable.close();
+                
+                fileData.isDirty = false;
+                fileData.doc.markClean();
+                renderFileTree();
+
+                if (state.activeFilePath === '/' + SNIPPETS_FILENAME) await updateSnippetUI();
+
+                const original = DOM.btnSave.textContent;
+                DOM.btnSave.textContent = 'Saved';
+                DOM.btnSave.className = DOM.btnSave.className.replace('bg-green-600', 'bg-green-800');
+                setTimeout(() => {
+                    DOM.btnSave.textContent = original;
+                    DOM.btnSave.className = DOM.btnSave.className.replace('bg-green-800', 'bg-green-600');
+                }, 800);
+            } catch (err) { console.error(err); }
+        }
+
+        async function deleteEntry(node) {
+            if (!confirm(`「${node.name}」を削除してもよろしいですか？`)) return;
+            try {
+                const parentPath = node.path.substring(0, node.path.lastIndexOf('/')) || '/';
+                const parentHandle = state.folders.get(parentPath);
+                await parentHandle.removeEntry(node.name, { recursive: true });
+                
+                if (node.kind === 'file') {
+                    state.files.delete(node.path);
+                    if (state.activeFilePath === node.path) {
+                        state.activeFilePath = null;
+                        state.editor.display.wrapper.hidden = false;
+                        state.editor.setValue('');
+                        DOM.btnSave.disabled = true;
+                        DOM.pathDisplay.textContent = 'ファイルを選択してください';
+                    }
+                } else {
+                    [...state.files.keys(), ...state.folders.keys()].forEach(p => {
+                        if (p.startsWith(node.path)) {
+                            state.files.delete(p);
+                            state.folders.delete(p);
+                            if (state.activeFilePath === p) {
+                                state.activeFilePath = null;
+                                state.editor.display.wrapper.hidden = false;
+                                state.editor.setValue('');
+                                DOM.btnSave.disabled = true;
+                                DOM.pathDisplay.textContent = 'ファイルを選択してください';
+                            }
+                        }
+                    });
+                }
+                renderFileTree();
+            } catch (err) { console.error(err); }
+        }
+
+        async function createNewItem() {
+            const name = DOM.inputNewItemName.value.trim();
+            if (!name) return;
+            
+            const parentHandle = state.folders.get(state.targetFolder);
+            const path = state.targetFolder + (state.targetFolder === '/' ? '' : '/') + name;
+            
+            if (state.files.has(path) || state.folders.has(path)) return alert('同名のファイル/フォルダが存在します');
+
+            try {
+                if (state.createType === 'file') {
+                    const handle = await parentHandle.getFileHandle(name, { create: true });
+                    state.files.set(path, { handle, doc: null, data: null, isDirty: false });
+                    state.expandedFolders.add(state.targetFolder);
+                    hideModal();
+                    renderFileTree();
+                    openFile(path);
+                } else {
+                    const handle = await parentHandle.getDirectoryHandle(name, { create: true });
+                    state.folders.set(path, handle);
+                    state.expandedFolders.add(state.targetFolder);
+                    state.expandedFolders.add(path);
+                    hideModal();
+                    renderFileTree();
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        function showModal(folderPath = '/') {
+            state.targetFolder = folderPath;
+            DOM.targetFolderDisplay.textContent = `作成先: ${folderPath}`;
+            DOM.modal.classList.remove('hidden');
+            DOM.inputNewItemName.focus();
+            setCreateType('file');
+        }
+
+        function hideModal() {
+            DOM.modal.classList.add('hidden');
+            DOM.inputNewItemName.value = '';
+        }
+
+        function setCreateType(type) {
+            state.createType = type;
+            if (type === 'file') {
+                DOM.typeFile.classList.add('active', 'bg-blue-600', 'text-white');
+                DOM.typeFile.classList.remove('text-gray-400');
+                DOM.typeFolder.classList.remove('active', 'bg-blue-600', 'text-white');
+                DOM.typeFolder.classList.add('text-gray-400');
+                DOM.inputNewItemName.placeholder = "例: index.html";
+            } else {
+                DOM.typeFolder.classList.add('active', 'bg-blue-600', 'text-white');
+                DOM.typeFolder.classList.remove('text-gray-400');
+                DOM.typeFile.classList.remove('active', 'bg-blue-600', 'text-white');
+                DOM.typeFile.classList.add('text-gray-400');
+                DOM.inputNewItemName.placeholder = "例: components";
+            }
+        }
+
+        /**
+         * Event Listeners
+         */
+        window.onload = async () => {
+            initEditor();
+
+            DOM.tabFiles.onclick = () => {
+                DOM.tabFiles.className = 'flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500';
+                DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
+                DOM.containerFiles.classList.remove('hidden');
+                DOM.containerSnippets.classList.add('hidden');
+            };
+            DOM.tabSnippets.onclick = () => {
+                DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500';
+                DOM.tabFiles.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
+                DOM.containerSnippets.classList.remove('hidden');
+                DOM.containerFiles.classList.add('hidden');
+            };
+
+            DOM.btnOpenDir.onclick = async () => {
+                try {
+                    const h = await window.showDirectoryPicker();
+                    await saveHandle(h);
+                    loadDirectory(h);
+                } catch(e) {}
+            };
+            DOM.btnRestoreDir.onclick = async () => {
+                const h = await getHandle();
+                if (h && (await h.requestPermission({ mode: 'readwrite' })) === 'granted') {
+                    loadDirectory(h);
+                }
+            };
+            DOM.btnSave.onclick = saveCurrentFile;
+            DOM.btnCancelModal.onclick = hideModal;
+            DOM.btnConfirmModal.onclick = createNewItem;
+            DOM.inputNewItemName.onkeypress = (e) => { e.key === 'Enter' && createNewItem(); };
+            
+            DOM.typeFile.onclick = () => setCreateType('file');
+            DOM.typeFolder.onclick = () => setCreateType('folder');
+
+            const saved = await getHandle();
+            if (saved) DOM.btnRestoreDir.classList.remove('hidden');
+        };
+    </script>
+</body>
+</html>
