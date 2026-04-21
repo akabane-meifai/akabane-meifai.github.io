@@ -8,14 +8,20 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/gh/canvas-table/canvas-table@v1/HTMLCanvasTableElement.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/sql-wasm.js" integrity="sha512-P3Yz5L06ijmktyFbUfhZmGriolebpOxxiNFgF+JtFj/wThktfoN1yjpKRBQfsPhA4Dl82ktp/XrOSSmGL1Bg3A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
-        main {
-            overflow: hidden;
-        }
         main img {
             max-height: 100%;
+            object-fit: contain;
+        }
+        canvas-table {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
         .CodeMirror {
+            flex: 1 1 0%;
             height: 100%;
             font-family: 'Fira Code', monospace;
             font-size: 12px;
@@ -69,6 +75,12 @@
             color: white;
             border-color: #2563eb;
         }
+        .info-container {
+            width: 312px;
+        }
+        .flex-table {
+            flex: 3 3 0%;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 h-screen flex flex-col overflow-hidden">
@@ -114,9 +126,17 @@
         </aside>
 
         <!-- Editor Area -->
-        <main class="flex-1 relative">
-            <textarea id="editor-textarea"></textarea>
-            <img id="view-image" alt="preview">
+        <main class="flex flex-col flex-1 overflow-hidden">
+            <div class="flex flex-1 overflow-hidden relative">
+                <div class="info-container overflow-hidden" hidden>
+                    <canvas-table id="view-info"></canvas-table>
+                </div>
+                <textarea id="editor-textarea"></textarea>
+            </div>
+            <div class="flex-table overflow-hidden" hidden>
+                <canvas-table id="view-database"></canvas-table>
+            </div>
+            <img id="view-image" alt="preview" hidden>
         </main>
     </div>
 
@@ -148,12 +168,215 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/xml/xml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/htmlmixed/htmlmixed.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/markdown/markdown.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/sql/sql.min.js"></script>
 
     <script>
+        class SelectableCanvasTableModel extends CanvasTableModel{
+            constructor(header, data){
+                super(header, data);
+                Object.assign(this, {
+                    selection: null,
+                    isSelecting: false,
+                    copyDataFilter(value){
+                        if(value == null){
+                            return "";
+                        }
+                        if(typeof value === 'number'){
+                            return value.toString(10);
+                        }
+                        if(typeof value === 'boolean'){
+                            return value ? "true" : "false";
+                        }
+                        return "\"" + `${value}`.replaceAll("\"", "\"\"") + "\"";
+                    },
+                    copyColumnSeparator: "\t",
+                    copyRowSeparator: "\n"
+                });
+
+                // イベントリスナーの設定
+                this.addEventListener("table-attache", e => {
+                    e.element.addEventListener("dragend", this.onMouseUp);
+                    e.element.addEventListener("copy", this.onCopy);
+                });
+                this.addEventListener("table-detache", e => {
+                    e.element.removeEventListener("dragend", this.onMouseUp);
+                    e.element.removeEventListener("copy", this.onCopy);
+                });
+                this.addEventListener("table-click", this.onClick);
+                this.addEventListener("table-dragstart", this.onMouseDown);
+                this.addEventListener("table-drag", this.onMouseMove);
+            }
+            onMouseUp(e){
+                const {table} = e.target;
+                table.isSelecting = false;
+            }
+            onCopy(e){
+                const {ctx, table} = e.target;
+                if(!table.selection){
+                    return;
+                }
+                const {start, end} = table.selection;
+                const minRow = Math.min(start.row, end.row);
+                const maxRow = Math.max(start.row, end.row);
+                const minCol = Math.min(start.col, end.col);
+                const maxCol = Math.max(start.col, end.col);
+                const data = [];
+                for(let rowNo = minRow; rowNo <= maxRow; rowNo++){
+                    const rowData = [];
+                    for(let columnNo = minCol; columnNo <= maxCol; columnNo++){
+                        rowData.push(table.copyDataFilter(table.data.at(rowNo).at(columnNo)));
+                    }
+                    data.push(rowData.join(table.copyColumnSeparator));
+                }
+                e.clipboardData.setData("text/plain", data.join(table.copyRowSeparator));
+                e.preventDefault();
+            }
+            onClick(e){
+                const target = e.target;
+                if(e.addr.rowNo === null || e.addr.columnNo === null){
+                    target.selection = null;
+                    e.element.rerender();
+                    return;
+                };
+                target.selection = {
+                    start: {row: e.addr.rowNo, col: e.addr.columnNo},
+                    end: {row: e.addr.rowNo, col: e.addr.columnNo}
+                };
+                e.element.rerender();
+            }
+            onMouseDown(e){
+                const target = e.target;
+                if(e.addr.rowNo === null || e.addr.columnNo === null){
+                    target.selection = null;
+                    e.element.rerender();
+                    return;
+                }
+                target.isSelecting = true;
+                target.selection = {
+                    start: {row: e.addr.rowNo, col: e.addr.columnNo},
+                    end: {row: e.addr.rowNo, col: e.addr.columnNo}
+                };
+                e.element.rerender();
+            }
+            onMouseMove(e){
+                const target = e.target;
+                if (!target.isSelecting || e.addr.rowNo === null || e.addr.columnNo === null) return;
+
+                // 終了地点を更新
+                target.selection.end = { row: e.addr.rowNo, col: e.addr.columnNo };
+                e.element.rerender();
+            }
+
+            /**
+             * セル描画のオーバーライド
+             */
+            drawData(renderer, rowNo, columnNo){
+                renderer.border("rgba(0,0,0,0.15)", 1);
+                if(rowNo == null){
+                    if(columnNo == null){
+                        renderer.background = "#1f2937";
+                        return;
+                    }
+                    renderer.background = "#1f2937";
+                    renderer.addText({
+                        textAlign: "center",
+                        textBaseline: "middle",
+                        shrinkToFit: true,
+                        padding: 2
+                    }).add(this.header[columnNo], "white", "12px 'Fira Code', monospace");
+                    return;
+                }
+                if(columnNo == null){
+                    renderer.background = "#282a36";
+                    renderer.addText({
+                        textAlign: "right",
+                        textBaseline: "middle",
+                        shrinkToFit: true,
+                        padding: 2
+                    }).add(rowNo + 1, "#6d8a88", "12px 'Fira Code', monospace");
+                    return;
+                }
+                let data = this.data.at(rowNo).at(columnNo);
+                let dataTextAlign = "left";
+                if(typeof data === 'number'){
+                    dataTextAlign = "right";
+                }
+                renderer.background = "#282a36";
+                if(data != null){
+                    renderer.addText({
+                        textAlign: dataTextAlign,
+                        textBaseline: "middle",
+                        shrinkToFit: true,
+                        padding: 2
+                    }).add(data, "black", "12px 'Fira Code', monospace");
+                }
+            }
+
+            /**
+             * オーバーレイ描画のオーバーライド
+             * 選択範囲の外枠に罫線を描画する
+             */
+            drawOverlay(object){
+                if(!this.selection){
+                    return;
+                }
+                const {ctx, table} = object;
+                const {start, end} = this.selection;
+                const minRow = Math.min(start.row, end.row);
+                const maxRow = Math.max(start.row, end.row);
+                const minCol = Math.min(start.col, end.col);
+                const maxCol = Math.max(start.col, end.col);
+
+                // 描画対象のセルが仮想表示範囲内にあるか確認して座標を計算
+                let displayRect = { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity };
+                let visible = false;
+
+                // 表示されているセルの中から選択範囲に含まれるものの座標を合算
+                for(let col of this.virtual.columns){
+                    if(col.index >= minCol && col.index <= maxCol){
+                        displayRect.left = Math.min(displayRect.left, col.x);
+                        displayRect.right = Math.max(displayRect.right, col.x + col.width);
+                        visible = true;
+                    }
+                }
+                for(let row of this.virtual.rows){
+                    if(row.index >= minRow && row.index <= maxRow){
+                        displayRect.top = Math.min(displayRect.top, row.y);
+                        displayRect.bottom = Math.max(displayRect.bottom, row.y + row.height);
+                        visible = true;
+                    }
+                }
+                if(!visible || displayRect.left === Infinity){
+                    return;
+                }
+
+                // 選択範囲の枠線を描画
+                ctx.save();
+                ctx.strokeStyle = "#4b89ff";
+                ctx.lineWidth = 3;
+                ctx.setLineDash([]);
+                ctx.strokeRect(
+                    displayRect.left, 
+                    displayRect.top, 
+                    displayRect.right - displayRect.left, 
+                    displayRect.bottom - displayRect.top
+                );
+                ctx.fillStyle = "rgba(75, 137, 255, 0.1)";
+                ctx.fillRect(
+                    displayRect.left, 
+                    displayRect.top, 
+                    displayRect.right - displayRect.left, 
+                    displayRect.bottom - displayRect.top
+                );
+                ctx.restore();
+            }
+        }
+
         const SNIPPETS_FILENAME = 'snippets.txt';
         const DEFAULT_SNIPPETS = `カテゴリ別スニペット\n\n## Common\n\n### Console Log\nconsole.log('');\n`;
         const DB_NAME = 'FSEditorDB';
         const STORE_NAME = 'handles';
+        initSqlJs({locateFile(file){return `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/${file}`;}}).then(a => {self.Database = a.Database;});
 
         // IndexedDB
         async function openDB() {
@@ -212,7 +435,9 @@
             inputNewItemName: document.getElementById('new-item-name'),
             typeFile: document.getElementById('type-file'),
             typeFolder: document.getElementById('type-folder'),
-            viewImage: document.getElementById('view-image')
+            viewImage: document.getElementById('view-image'),
+            viewInfo: document.getElementById('view-info'),
+            viewDatabase: document.getElementById('view-database')
         };
 
         /**
@@ -303,6 +528,12 @@
                         binary: true,
                         mode: null,
                         view: 'image'
+                    };
+                case 'db':
+                    return {
+                        binary: true,
+                        mode: 'sql',
+                        view: 'database'
                     };
                 default:
                     return {
@@ -549,26 +780,60 @@
             const fileType = getTypeByExtension(path);
             if (!fileData.doc) {
                 const file = await fileData.handle.getFile();
-                if (typeof fileType.mode === 'string') {
+                if (typeof fileType.mode === 'string' && !fileType.binary) {
                     const text = await file.text();
                     fileData.doc = CodeMirror.Doc(text, fileType.mode);
                 } else if (fileType.view === 'image') {
                     const url = URL.createObjectURL(file);
                     fileData.data = {url};
                     fileData.doc = CodeMirror.Doc('', 'text/plain');
+                } else if (fileType.view === 'database') {
+                    const table = new SelectableCanvasTableModel(['Col1'], [['']]);
+                    const info = Object.assign(new SelectableCanvasTableModel(['スキーマ', 'テーブル', 'フィールド'], []), {
+                        hasRow: false,
+                        hasHorizontalScrollbar: false,
+                        getWidth(columnNo){
+                            return 100;
+                        },
+                        copyDataFilter(value){
+                            return `${value}`;
+                        },
+                        copyColumnSeparator: ".",
+                        copyRowSeparator: ","
+                    });
+                    info.hasHorizontalScrollbar = false;
+                    fileData.data = {table, info};
+                    fileData.doc = CodeMirror.Doc('', 'sql');
                 } else {
                     fileData.doc = CodeMirror.Doc('', 'text/plain');
                 }
             }
 
-            if (typeof fileType.mode === 'string') {
+            if (typeof fileType.mode === 'string' && !fileType.binary) {
                state.editor.display.wrapper.hidden = false;
+               DOM.viewImage.hidden = true;
+               DOM.viewInfo.parentNode.hidden = true;
+               DOM.viewDatabase.parentNode.hidden = true;
                DOM.viewImage.removeAttribute('src');
             } else if (fileType.view === 'image') {
                state.editor.display.wrapper.hidden = true;
+               DOM.viewImage.hidden = false;
+               DOM.viewInfo.parentNode.hidden = true;
+               DOM.viewDatabase.parentNode.hidden = true;
                DOM.viewImage.setAttribute('src', fileData.data.url);
+            } else if (fileType.view === 'database') {
+               state.editor.display.wrapper.hidden = false;
+               DOM.viewImage.hidden = true;
+               DOM.viewInfo.parentNode.hidden = false;
+               DOM.viewDatabase.parentNode.hidden = false;
+               DOM.viewInfo.table = fileData.data.info;
+               DOM.viewDatabase.table = fileData.data.table;
+               DOM.viewImage.removeAttribute('src');
             } else {
                state.editor.display.wrapper.hidden = false;
+               DOM.viewImage.hidden = true;
+               DOM.viewInfo.parentNode.hidden = true;
+               DOM.viewDatabase.parentNode.hidden = true;
                DOM.viewImage.removeAttribute('src');
             }
             state.editor.swapDoc(fileData.doc);
@@ -617,6 +882,9 @@
                     if (state.activeFilePath === node.path) {
                         state.activeFilePath = null;
                         state.editor.display.wrapper.hidden = false;
+                        DOM.viewImage.hidden = true;
+                        DOM.viewInfo.parentNode.hidden = true;
+                        DOM.viewDatabase.parentNode.hidden = true;
                         state.editor.setValue('');
                         DOM.btnSave.disabled = true;
                         DOM.pathDisplay.textContent = 'ファイルを選択してください';
@@ -629,6 +897,9 @@
                             if (state.activeFilePath === p) {
                                 state.activeFilePath = null;
                                 state.editor.display.wrapper.hidden = false;
+                                DOM.viewImage.hidden = true;
+                                DOM.viewInfo.parentNode.hidden = true;
+                                DOM.viewDatabase.parentNode.hidden = true;
                                 state.editor.setValue('');
                                 DOM.btnSave.disabled = true;
                                 DOM.pathDisplay.textContent = 'ファイルを選択してください';
