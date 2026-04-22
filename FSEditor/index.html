@@ -388,7 +388,22 @@
         const DEFAULT_SNIPPETS = `カテゴリ別スニペット\n\n## Common\n\n### Console Log\nconsole.log('');\n`;
         const DB_NAME = 'FSEditorDB';
         const STORE_NAME = 'handles';
-        initSqlJs({locateFile(file){return `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/${file}`;}}).then(a => {self.Database = a.Database;});
+        initSqlJs({locateFile(file){return `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/${file}`;}}).then(a => {
+            self.Database = function (ba, filename = null){
+                const obj = Object.create(
+                    a.Database.prototype,
+                    filename == null ? {} : {
+                        filename: {
+                            value: filename,
+                            writable: false,
+                            configurable: true
+                        }
+                    }
+                );
+                obj.constructor(ba);
+                return obj;
+            };
+        });
 
         // IndexedDB
         async function openDB() {
@@ -816,7 +831,7 @@
                         copyColumnSeparator: ".",
                         copyRowSeparator: ","
                     });
-                    const db = new Database(new Uint8Array(binary));
+                    const db = new Database(new Uint8Array(binary), path);
                     info.hasHorizontalScrollbar = false;
                     fileData.data = {table, info, db};
                     refreshDbList(fileData.data);
