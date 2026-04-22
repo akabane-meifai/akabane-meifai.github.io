@@ -98,6 +98,9 @@
             <button id="btn-save" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm opacity-50 cursor-not-allowed" disabled>
                 保存 (Ctrl+S)
             </button>
+            <button id="btn-execute" class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm hidden">
+                実行
+            </button>
         </div>
         <div id="current-file-path" class="text-xs text-gray-400 italic px-4 truncate max-w-md">ファイルを選択してください</div>
     </header>
@@ -129,12 +132,12 @@
         <main class="flex flex-col flex-1 overflow-hidden">
             <div class="flex flex-1 overflow-hidden relative">
                 <div class="info-container overflow-hidden" hidden>
-                    <canvas-table id="view-info"></canvas-table>
+                    <canvas-table id="view-info" tabindex="0"></canvas-table>
                 </div>
                 <textarea id="editor-textarea"></textarea>
             </div>
             <div class="flex-table overflow-hidden" hidden>
-                <canvas-table id="view-database"></canvas-table>
+                <canvas-table id="view-database" tabindex="0"></canvas-table>
             </div>
             <img id="view-image" alt="preview" hidden>
         </main>
@@ -271,7 +274,7 @@
              * セル描画のオーバーライド
              */
             drawData(renderer, rowNo, columnNo){
-                renderer.border("rgba(0,0,0,0.15)", 1);
+                renderer.border("rgba(255,255,255,0.15)", 1);
                 if(rowNo == null){
                     if(columnNo == null){
                         renderer.background = "#1f2937";
@@ -298,17 +301,26 @@
                 }
                 let data = this.data.at(rowNo).at(columnNo);
                 let dataTextAlign = "left";
+                let textColor = "#ffffff";
                 if(typeof data === 'number'){
                     dataTextAlign = "right";
+                    textColor = "#bd93f9";
                 }
                 renderer.background = "#282a36";
-                if(data != null){
+                if(data == null){
+                    renderer.addText({
+                        textAlign: "center",
+                        textBaseline: "middle",
+                        shrinkToFit: true,
+                        padding: 2
+                    }).add("NULL", "#6d8a88", "12px 'Fira Code', monospace");
+                }else{
                     renderer.addText({
                         textAlign: dataTextAlign,
                         textBaseline: "middle",
                         shrinkToFit: true,
                         padding: 2
-                    }).add(data, "black", "12px 'Fira Code', monospace");
+                    }).add(data, textColor, "12px 'Fira Code', monospace");
                 }
             }
 
@@ -420,6 +432,7 @@
             btnOpenDir: document.getElementById('btn-open-dir'),
             btnRestoreDir: document.getElementById('btn-restore-dir'),
             btnSave: document.getElementById('btn-save'),
+            btnExecute: document.getElementById('btn-execute'),
             fileTree: document.getElementById('file-tree'),
             snippetLabel: document.getElementById('snippet-label'),
             snippetCategories: document.getElementById('snippet-categories'),
@@ -530,6 +543,7 @@
                         view: 'image'
                     };
                 case 'db':
+                case 'sqlite3':
                     return {
                         binary: true,
                         mode: 'sql',
@@ -788,7 +802,8 @@
                     fileData.data = {url};
                     fileData.doc = CodeMirror.Doc('', 'text/plain');
                 } else if (fileType.view === 'database') {
-                    const table = new SelectableCanvasTableModel(['Col1'], [['']]);
+                    const binary = await file.arrayBuffer();
+                    const table = new SelectableCanvasTableModel([], []);
                     const info = Object.assign(new SelectableCanvasTableModel(['スキーマ', 'テーブル', 'フィールド'], []), {
                         hasRow: false,
                         hasHorizontalScrollbar: false,
@@ -801,8 +816,10 @@
                         copyColumnSeparator: ".",
                         copyRowSeparator: ","
                     });
+                    const db = new Database(new Uint8Array(binary));
                     info.hasHorizontalScrollbar = false;
-                    fileData.data = {table, info};
+                    fileData.data = {table, info, db};
+                    refreshDbList(fileData.data);
                     fileData.doc = CodeMirror.Doc('', 'sql');
                 } else {
                     fileData.doc = CodeMirror.Doc('', 'text/plain');
@@ -814,12 +831,14 @@
                DOM.viewImage.hidden = true;
                DOM.viewInfo.parentNode.hidden = true;
                DOM.viewDatabase.parentNode.hidden = true;
+               DOM.btnExecute.classList.add('hidden');
                DOM.viewImage.removeAttribute('src');
             } else if (fileType.view === 'image') {
                state.editor.display.wrapper.hidden = true;
                DOM.viewImage.hidden = false;
                DOM.viewInfo.parentNode.hidden = true;
                DOM.viewDatabase.parentNode.hidden = true;
+               DOM.btnExecute.classList.add('hidden');
                DOM.viewImage.setAttribute('src', fileData.data.url);
             } else if (fileType.view === 'database') {
                state.editor.display.wrapper.hidden = false;
@@ -828,12 +847,14 @@
                DOM.viewDatabase.parentNode.hidden = false;
                DOM.viewInfo.table = fileData.data.info;
                DOM.viewDatabase.table = fileData.data.table;
+               DOM.btnExecute.classList.remove('hidden');
                DOM.viewImage.removeAttribute('src');
             } else {
                state.editor.display.wrapper.hidden = false;
                DOM.viewImage.hidden = true;
                DOM.viewInfo.parentNode.hidden = true;
                DOM.viewDatabase.parentNode.hidden = true;
+               DOM.btnExecute.classList.add('hidden');
                DOM.viewImage.removeAttribute('src');
             }
             state.editor.swapDoc(fileData.doc);
@@ -851,7 +872,11 @@
             
             try {
                 const writable = await fileData.handle.createWritable();
-                await writable.write(state.editor.getValue());
+                if (fileType.binary && fileType.view === 'database') {
+                    await writable.write(fileData.data.db.export());
+                } else {
+                    await writable.write(state.editor.getValue());
+                }
                 await writable.close();
                 
                 fileData.isDirty = false;
@@ -885,6 +910,7 @@
                         DOM.viewImage.hidden = true;
                         DOM.viewInfo.parentNode.hidden = true;
                         DOM.viewDatabase.parentNode.hidden = true;
+                        DOM.btnExecute.classList.add('hidden');
                         state.editor.setValue('');
                         DOM.btnSave.disabled = true;
                         DOM.pathDisplay.textContent = 'ファイルを選択してください';
@@ -900,6 +926,7 @@
                                 DOM.viewImage.hidden = true;
                                 DOM.viewInfo.parentNode.hidden = true;
                                 DOM.viewDatabase.parentNode.hidden = true;
+                                DOM.btnExecute.classList.add('hidden');
                                 state.editor.setValue('');
                                 DOM.btnSave.disabled = true;
                                 DOM.pathDisplay.textContent = 'ファイルを選択してください';
@@ -968,6 +995,26 @@
                 DOM.inputNewItemName.placeholder = "例: components";
             }
         }
+        
+        function refreshDbList(data) {
+            const {info, db} = data;
+            const tbody = [];
+            const schemas = db.exec("PRAGMA database_list")
+                .flatMap(res => res.values.map(row => row.at(1)));
+            for(let schema of schemas){
+                const tables = db.exec(`SELECT name FROM ${schema}.sqlite_master WHERE type='table'`)
+                    .flatMap(res => res.values.map(row => row.at(0)));
+                const results = db.exec(tables.map(table => `PRAGMA ${schema}.table_info("${table}")`).join(";"));
+                const values = tables.map((table, i) => [table, results[i].values.map(value => value.at(1))]);
+                for(let entry of values){
+                    const [table, fields] = entry;
+                    for(let value of fields){
+                        tbody.push([schema, table, value]);
+                    }
+                }
+            }
+            info.data = tbody;
+        }
 
         /**
          * Event Listeners
@@ -1008,6 +1055,46 @@
             
             DOM.typeFile.onclick = () => setCreateType('file');
             DOM.typeFolder.onclick = () => setCreateType('folder');
+
+            DOM.btnExecute.onclick = () => {
+                if (!state.activeFilePath) return;
+                const fileData = state.files.get(state.activeFilePath);
+                const fileType = getTypeByExtension(state.activeFilePath);
+                try {
+                    if (fileType.binary && fileType.view === 'database') {
+                        const {db, table} = fileData.data;
+                        const results = db.exec(state.editor.getValue());
+                        const result = (results.length > 0) ? results[0] : {values: [], columns: []};
+                        const ctx = DOM.viewDatabase.pdep6ph1vp.getContext(null);
+                        const font = "12px 'Fira Code', monospace";
+                        const option = document.createElement("option");
+                        const w = result.values.reduce((res, row) => {
+                            for(let i = res.length - 1; i >= 0; i--){
+                                const {width, height} = CanvasTableRenderer.measureMultilineText(ctx, `${row.at(i) ?? '      '}`, "transparent", font);
+                                res[i] = Math.max(res[i], width);
+                                row.height = Math.max(12, height);
+                            }
+                            row.height = Math.min(row.height + 4, 250);
+                            return res;
+                        }, result.columns.map(text => CanvasTableRenderer.measureMultilineText(ctx, `${text}`, "transparent", font).width));
+                        Object.assign(table, {
+                            data: result.values,
+                            header: result.columns,
+                            getWidth(columnNo){
+                                if(columnNo == null){
+                                    return 50;
+                                }
+                                return w[columnNo];
+                            }
+                        });
+                        refreshDbList(fileData.data);
+                        DOM.viewInfo.rerender();
+                        DOM.viewDatabase.rerender();
+                    }
+                } catch(e) {
+                    console.log(e);
+                }
+            };
 
             const saved = await getHandle();
             if (saved) DOM.btnRestoreDir.classList.remove('hidden');
