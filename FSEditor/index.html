@@ -394,7 +394,7 @@
                     a.Database.prototype,
                     filename == null ? {} : {
                         filename: {
-                            value: filename,
+                            value: filename.replaceAll('/', '-'),
                             writable: false,
                             configurable: true
                         }
