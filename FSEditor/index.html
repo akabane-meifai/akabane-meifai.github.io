@@ -98,6 +98,9 @@
             <button id="btn-save" class="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm opacity-50 cursor-not-allowed" disabled>
                 保存 (Ctrl+S)
             </button>
+            <button id="btn-import" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded text-sm transition hidden">
+                インポート
+            </button>
             <button id="btn-execute" class="bg-gray-600 hover:bg-gray-700 text-white px-3 py-1 rounded text-sm hidden">
                 実行
             </button>
@@ -162,6 +165,33 @@
                 <button id="btn-confirm-modal" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold">作成</button>
             </div>
         </div>
+    </div>
+
+    <!-- Modal for Import -->
+    <div id="modal-import-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+      <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-auto border border-gray-700">
+          <h2 id="modal-title" class="text-lg font-bold mb-4">インポート</h2>
+
+          <div class="text-xs text-blue-400 mb-2 truncate">CDN: ソースを選択</div>
+          <div class="import-container">
+            <div class="flex gap-2">
+              <select id="import-source-name" class="bg-gray-700 border border-gray-600 text-sm rounded px-3 py-2 mb-4 focus:ring-blue-500 focus:border-blue-500 block outline-none cursor-pointer transition-colors">
+                <option value="gh">GitHub</option>
+                <option value="npm">NPM</option>
+              </select>
+              <input type="text" id="import-package-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-4 text-white focus:outline-none focus:border-blue-500" placeholder="例: lodash or user/repo"/>
+            </div>
+          </div>
+
+          <div id="package-area" class="w-[40rem] max-w-full h-40 overflow-auto whitespace-pre font-mono text-[10px] bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
+          </div>
+
+          <div class="flex justify-end space-x-3">
+            <button id="btn-cancel-import-modal" class="text-gray-400 hover:text-white text-sm px-2">キャンセル</button>
+            <button id="btn-check-import-modal" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold">パッケージを確認</button>
+            <button id="btn-confirm-import-modal" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold opacity-50 cursor-not-allowed" disabled>インポート</button>
+          </div>
+      </div>
     </div>
 
     <!-- CodeMirror & Modes -->
@@ -447,6 +477,7 @@
             btnOpenDir: document.getElementById('btn-open-dir'),
             btnRestoreDir: document.getElementById('btn-restore-dir'),
             btnSave: document.getElementById('btn-save'),
+            btnImport: document.getElementById('btn-import'),
             btnExecute: document.getElementById('btn-execute'),
             fileTree: document.getElementById('file-tree'),
             snippetLabel: document.getElementById('snippet-label'),
@@ -457,10 +488,17 @@
             containerSnippets: document.getElementById('snippet-list-container'),
             pathDisplay: document.getElementById('current-file-path'),
             modal: document.getElementById('modal-overlay'),
+            modalImport: document.getElementById('modal-import-overlay'),
             targetFolderDisplay: document.getElementById('target-folder-display'),
             btnCancelModal: document.getElementById('btn-cancel-modal'),
             btnConfirmModal: document.getElementById('btn-confirm-modal'),
             inputNewItemName: document.getElementById('new-item-name'),
+            btnCancelImportModal: document.getElementById('btn-cancel-import-modal'),
+            btnCheckImportModal: document.getElementById('btn-check-import-modal'),
+            btnConfirmImportModal: document.getElementById('btn-confirm-import-modal'),
+            inputImportSource: document.getElementById('import-source-name'),
+            inputImportPackage: document.getElementById('import-package-name'),
+            packageArea: document.getElementById('package-area'),
             typeFile: document.getElementById('type-file'),
             typeFolder: document.getElementById('type-folder'),
             viewImage: document.getElementById('view-image'),
@@ -667,6 +705,7 @@
             state.files.clear();
             state.folders.clear();
             DOM.btnRestoreDir.classList.add('hidden');
+            DOM.btnImport.classList.remove('hidden');
             
             await scanDirectory(handle);
             
@@ -993,6 +1032,14 @@
             DOM.modal.classList.add('hidden');
             DOM.inputNewItemName.value = '';
         }
+      
+        function showImportModal() {
+          DOM.modalImport.classList.remove('hidden');
+        }
+
+        function hideImportModal() {
+          DOM.modalImport.classList.add('hidden');
+        }
 
         function setCreateType(type) {
             state.createType = type;
@@ -1031,6 +1078,42 @@
             info.data = tbody;
         }
 
+        async function listFromJsdelivr() {
+          const source = DOM.inputImportSource.value;
+          const [package, find] = DOM.inputImportPackage.value.split('@');
+          const res = await fetch(`https://data.jsdelivr.com/v1/packages/${source}/${package}/`);
+          const data = await res.json();
+          const found = data.versions.find(function(v){
+            if (this.toString() === 'latest') {
+              return true;
+            }
+            if (this.toString() === v.version) {
+              return true;
+            }
+            return v.version.startsWith(this + '.');
+          }, find ?? 'latest');
+          if (found == null) {
+            DOM.packageArea.textContent = '';
+          } else {
+            const link = found.links.self;
+            const res = await fetch(link);
+            const data = await res.json();
+            const readme = data.files.find(f => f.type === 'file' && f.name.toLowerCase() === 'readme.md');
+            if (readme == null) {
+              DOM.packageArea.textContent = '';
+            } else {
+              const res = await fetch(`https://cdn.jsdelivr.net/${source}/${package}/${readme.name}`);
+              const md = await res.text();
+              DOM.packageArea.textContent = md;
+            }
+          }
+          // TODO:
+        }
+
+        async function importFromJsdelivr() {
+          // TODO:
+        }
+
         /**
          * Event Listeners
          */
@@ -1067,6 +1150,10 @@
             DOM.btnCancelModal.onclick = hideModal;
             DOM.btnConfirmModal.onclick = createNewItem;
             DOM.inputNewItemName.onkeypress = (e) => { e.key === 'Enter' && createNewItem(); };
+            DOM.btnImport.onclick = showImportModal;
+            DOM.btnCancelImportModal.onclick = hideImportModal;
+            DOM.btnCheckImportModal.onclick = listFromJsdelivr;
+            DOM.btnConfirmImportModal.onclick = importFromJsdelivr;
             
             DOM.typeFile.onclick = () => setCreateType('file');
             DOM.typeFolder.onclick = () => setCreateType('folder');
