@@ -118,6 +118,7 @@
             <div class="flex border-b border-gray-700">
                 <button id="tab-files" class="flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500">ファイル</button>
                 <button id="tab-snippets" class="flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white">スニペット</button>
+                <button id="tab-macros" class="flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white">マクロ</button>
             </div>
             
             <!-- File Tree Container -->
@@ -132,6 +133,12 @@
             <div id="snippet-list-container" class="hidden flex-1 overflow-y-auto p-2">
                 <div id="snippet-label" class="text-xs font-semibold text-gray-500 uppercase mb-4 px-2">カテゴリ別スニペット</div>
                 <div id="snippet-categories" class="space-y-2"></div>
+            </div>
+
+            <!-- Macro List Container -->
+            <div id="macro-list-container" class="hidden flex-1 overflow-y-auto p-2">
+                <div class="text-xs font-semibold text-gray-500 uppercase mb-4 px-2">登録済みマクロ</div>
+                <div id="macro-list" class="space-y-2"></div>
             </div>
         </aside>
 
@@ -440,6 +447,7 @@
         }
 
         const SNIPPETS_FILENAME = '.snippets';
+        const MACRO_DIR = '/.macros';
         const DEFAULT_SNIPPETS = `カテゴリ別スニペット\n\n## Common\n\n### Console Log\nconsole.log('');\n`;
         const DB_NAME = 'FSEditorDB';
         const STORE_NAME = 'handles';
@@ -493,6 +501,7 @@
             files: new Map(), // path -> { handle, doc, isDirty }
             folders: new Map(), // path -> handle
             expandedFolders: new Set(['/']),
+            macros: new Map(), // path -> { name, permissions, content }
             activeFilePath: null,
             targetFolder: '/', // For new item creation
             createType: 'file', // 'file' or 'folder'
@@ -529,7 +538,10 @@
             typeFolder: document.getElementById('type-folder'),
             viewImage: document.getElementById('view-image'),
             viewInfo: document.getElementById('view-info'),
-            viewDatabase: document.getElementById('view-database')
+            viewDatabase: document.getElementById('view-database'),
+            tabMacros: document.getElementById('tab-macros'),
+            containerMacros: document.getElementById('macro-list-container'),
+            macroList: document.getElementById('macro-list')
         };
 
         /**
@@ -756,6 +768,7 @@
 
             renderFileTree();
             updateSnippetUI();
+            updateMacroUI();
         }
 
         function renderFileTree() {
@@ -972,6 +985,7 @@
                 renderFileTree();
 
                 if (state.activeFilePath === '/' + SNIPPETS_FILENAME) await updateSnippetUI();
+                if (state.activeFilePath.startsWith(MACRO_DIR + '/')) await updateMacroUI();
 
                 const original = DOM.btnSave.textContent;
                 DOM.btnSave.textContent = 'Saved';
@@ -1237,6 +1251,7 @@
             await scanDirectory(state.rootHandle);
             renderFileTree();
             if (state.files.has('/' + SNIPPETS_FILENAME)) await updateSnippetUI();
+            if (Array.from(state.files.keys()).some(filePath => filePath.startsWith(MACRO_DIR + '/'))) await updateMacroUI();
 
             setTimeout(() => {
               hideImportModal();
@@ -1250,6 +1265,108 @@
           }
         }
 
+        async function updateMacroUI() {
+          DOM.macroList.innerHTML = '';
+          state.macros.clear();
+      
+          // .macros フォルダ内の js ファイルを走査
+          const macroFiles = [...state.files.keys()].filter(p => p.startsWith(MACRO_DIR) && p.endsWith('.js'));
+      
+          for (const path of macroFiles) {
+              try {
+                  const fileData = state.files.get(path);
+                  const file = await fileData.handle.getFile();
+                  const content = await file.text();
+      
+                  // メタデータの抽出 (例: // Name: MyMacro, Permissions: file_read)
+                  const metaLine = content.split('\n')[0];
+                  const nameMatch = metaLine.match(/Name:\s*([^,]+)/);
+                  const permMatch = metaLine.match(/Permissions:\s*([^,]+)/);
+      
+                  const macro = {
+                      path,
+                      name: nameMatch ? nameMatch[1].trim() : path.split('/').pop(),
+                      permissions: permMatch ? permMatch[1].trim().split(/\s+/) : [],
+                      content: content
+                  };
+      
+                  state.macros.set(path, macro);
+      
+                  // UIの生成
+                  const item = document.createElement('div');
+                  item.className = 'p-2 bg-gray-700/50 rounded hover:bg-gray-600 cursor-pointer border border-transparent hover:border-green-500 group';
+                  item.innerHTML = `
+                      <div class="text-sm font-medium text-gray-200">${macro.name}</div>
+                      <div class="text-[10px] text-gray-500 truncate">${macro.permissions.join(', ') || 'no perms'}</div>
+                  `;
+                  item.onclick = () => runMacro(path);
+                  DOM.macroList.appendChild(item);
+              } catch (e) {
+                  console.error("Macro load error:", e);
+              }
+          }
+        }
+      
+        async function runMacro(path) {
+          const macroData = state.macros.get(path);
+          if (!macroData) return;
+      
+          console.log(`Running macro: ${macroData.name}`);
+          const permissions = new Set(macroData.permissions);
+          
+          // Blobを利用してWorkerを作成
+          const blob = new Blob([
+            "self.onmessage = e => { const Editor = { port: e.ports[0], seq: 0, async request(type, payload = {}) { const port = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data.requestId === requestId) { port.removeEventListener('message', handler); ev.data.success ? resolve(ev.data.result) : reject(ev.data.error); } }; port.addEventListener('message', handler); port.postMessage({ type, payload, requestId }); }); } }; Editor.port.start(); (async () => { try {\n",
+            macroData.content,
+            "\nconsole.log('Macro finished successfully'); } catch (err) { console.error('Macro Error:', err); } finally { self.close(); } })(); };"
+          ], { type: 'application/javascript' });
+          const worker = new Worker(URL.createObjectURL(blob));
+          const channel = new MessageChannel();
+      
+          // マクロAPIの実装
+          const apiHandlers = {
+              async get_editor_value() {
+                  if (!permissions.has('editor_read')) throw "Permission denied: editor_read";
+                  return state.editor.getValue();
+              },
+              async set_editor_value({ value }) {
+                  if (!permissions.has('editor_write')) throw "Permission denied: editor_write";
+                  state.editor.setValue(value);
+              },
+              async read_file({ filePath }) {
+                  if (!permissions.has('file_read')) throw "Permission denied: file_read";
+                  const fileData = state.files.get(filePath);
+                  if (!fileData) throw "File not found";
+                  const file = await fileData.handle.getFile();
+                  return await file.text();
+              },
+              async write_file({ filePath, content }) {
+                  if (!permissions.has('file_write')) throw "Permission denied: file_write";
+                  const fileData = state.files.get(filePath);
+                  if (!fileData) throw "File not found";
+                  const writable = await fileData.handle.createWritable();
+                  await writable.write(content);
+                  await writable.close();
+                  fileData.isDirty = false;
+                  renderFileTree();
+              }
+          };
+      
+          channel.port2.onmessage = async (e) => {
+              const { type, payload, requestId } = e.data;
+              try {
+                  if (apiHandlers[type]) {
+                      const result = await apiHandlers[type](payload);
+                      channel.port2.postMessage({ requestId, result, success: true });
+                  }
+              } catch (err) {
+                  channel.port2.postMessage({ requestId, error: err.toString(), success: false });
+              }
+          };
+      
+          worker.postMessage({ type: 'init' }, [channel.port1]);
+        }
+      
         /**
          * Event Listeners
          */
@@ -1258,15 +1375,24 @@
 
             DOM.tabFiles.onclick = () => {
                 DOM.tabFiles.className = 'flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500';
-                DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
+                DOM.tabMacros.className = DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
                 DOM.containerFiles.classList.remove('hidden');
                 DOM.containerSnippets.classList.add('hidden');
+                DOM.containerMacros.classList.add('hidden');
             };
             DOM.tabSnippets.onclick = () => {
                 DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500';
-                DOM.tabFiles.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
+                DOM.tabMacros.className = DOM.tabFiles.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
                 DOM.containerSnippets.classList.remove('hidden');
                 DOM.containerFiles.classList.add('hidden');
+                DOM.containerMacros.classList.add('hidden');
+            };
+            DOM.tabMacros.onclick = () => {
+                DOM.tabMacros.className = 'flex-1 py-2 text-sm font-medium bg-gray-700 border-b-2 border-blue-500';
+                DOM.tabFiles.className = DOM.tabSnippets.className = 'flex-1 py-2 text-sm font-medium text-gray-400 hover:text-white';
+                DOM.containerFiles.classList.add('hidden');
+                DOM.containerSnippets.classList.add('hidden');
+                DOM.containerMacros.classList.remove('hidden');
             };
 
             DOM.btnOpenDir.onclick = async () => {
