@@ -7,6 +7,7 @@
     <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.1.0/github-markdown-dark.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/gh/canvas-table/canvas-table@v1/HTMLCanvasTableElement.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/sql-wasm.js" integrity="sha512-P3Yz5L06ijmktyFbUfhZmGriolebpOxxiNFgF+JtFj/wThktfoN1yjpKRBQfsPhA4Dl82ktp/XrOSSmGL1Bg3A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -177,13 +178,13 @@
             <div class="flex gap-2">
               <select id="import-source-name" class="bg-gray-700 border border-gray-600 text-sm rounded px-3 py-2 mb-4 focus:ring-blue-500 focus:border-blue-500 block outline-none cursor-pointer transition-colors">
                 <option value="gh">GitHub</option>
-                <option value="npm">NPM</option>
+                <option value="npm">npm</option>
               </select>
               <input type="text" id="import-package-name" class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-2 mb-4 text-white focus:outline-none focus:border-blue-500" placeholder="例: lodash or user/repo"/>
             </div>
           </div>
 
-          <div id="package-area" class="w-[40rem] max-w-full h-40 overflow-auto whitespace-pre font-mono text-[10px] bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
+          <div id="package-area" class="markdown-body w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
           </div>
 
           <div class="flex justify-end space-x-3">
@@ -202,6 +203,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/htmlmixed/htmlmixed.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/markdown/markdown.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/sql/sql.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <script>
         class SelectableCanvasTableModel extends CanvasTableModel{
@@ -470,7 +472,8 @@
             expandedFolders: new Set(['/']),
             activeFilePath: null,
             targetFolder: '/', // For new item creation
-            createType: 'file' // 'file' or 'folder'
+            createType: 'file', // 'file' or 'folder'
+            cdn: null // For import
         };
 
         const DOM = {
@@ -1079,6 +1082,10 @@
         }
 
         async function listFromJsdelivr() {
+          state.cdn = null;
+          DOM.packageArea.textContent = '';
+          DOM.btnConfirmImportModal.disabled = true;
+          DOM.btnConfirmImportModal.classList.add('opacity-50', 'cursor-not-allowed');
           const source = DOM.inputImportSource.value;
           const [package, find] = DOM.inputImportPackage.value.split('@');
           const res = await fetch(`https://data.jsdelivr.com/v1/packages/${source}/${package}/`);
@@ -1104,10 +1111,12 @@
             } else {
               const res = await fetch(`https://cdn.jsdelivr.net/${source}/${package}/${readme.name}`);
               const md = await res.text();
-              DOM.packageArea.textContent = md;
+              DOM.packageArea.innerHTML = marked.parse(md);
             }
+            DOM.btnConfirmImportModal.disabled = false;
+            DOM.btnConfirmImportModal.classList.remove('opacity-50', 'cursor-not-allowed');
+            state.cdn = data;
           }
-          // TODO:
         }
 
         async function importFromJsdelivr() {
