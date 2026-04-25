@@ -184,8 +184,18 @@
             </div>
           </div>
 
-          <div id="package-area" class="markdown-body w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
+          <div class="grid grid-cols-2 gap-2 mb-4">
+            <div>
+              <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">CDN上のファイル</label>
+              <select id="import-file-path" class="w-full bg-gray-700 border border-gray-600 text-xs rounded px-2 py-1.5 outline-none focus:border-blue-500"><option value="/">/</option></select>
+            </div>
+            <div>
+              <label class="block text-[10px] text-gray-500 uppercase font-bold mb-1">ローカル保存先</label>
+              <select id="import-local-dest" class="w-full bg-gray-700 border border-gray-600 text-xs rounded px-2 py-1.5 outline-none focus:border-blue-500"><option value="/">/</option></select>
+            </div>
           </div>
+        
+          <div id="package-area" class="markdown-body w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4"></div>
 
           <div class="flex justify-end space-x-3">
             <button id="btn-cancel-import-modal" class="text-gray-400 hover:text-white text-sm px-2">キャンセル</button>
@@ -1037,6 +1047,16 @@
         }
       
         function showImportModal() {
+          // 保存先をエクスプローラーのフォルダに同期
+          const dest = document.getElementById('import-local-dest');
+          dest.innerHTML = '';
+          for (const path of state.folders.keys()) {
+            const opt = document.createElement('option');
+            opt.value = path;
+            opt.textContent = path.endsWith('/') ? path : path + '/';
+            dest.appendChild(opt);
+          }
+          dest.value = '/';
           DOM.modalImport.classList.remove('hidden');
         }
 
@@ -1081,46 +1101,132 @@
             info.data = tbody;
         }
 
+        function flattenJsdelivrFiles(files, prefix = '') {
+          let results = {files: [], directories: []};
+          for (const file of files) {
+            const path = prefix + '/' + file.name;
+            if (file.type === 'file') {
+              results.files.push(path);
+            } else if (file.type === 'directory' && file.files) {
+              const sub = flattenJsdelivrFiles(file.files, path);
+              results.directories.push(path + '/');
+              results.files = results.files.concat(sub.files);
+              results.directories = results.directories.concat(sub.directories);
+            }
+          }
+          return results;
+        }
+
         async function listFromJsdelivr() {
           state.cdn = null;
-          DOM.packageArea.textContent = '';
-          DOM.btnConfirmImportModal.disabled = true;
-          DOM.btnConfirmImportModal.classList.add('opacity-50', 'cursor-not-allowed');
+          DOM.packageArea.textContent = '読み込み中...';
+          const selectFile = document.getElementById('import-file-path');
+          selectFile.innerHTML = '<option value="/">/</option>';
+
           const source = DOM.inputImportSource.value;
-          const [package, find] = DOM.inputImportPackage.value.split('@');
-          const res = await fetch(`https://data.jsdelivr.com/v1/packages/${source}/${package}/`);
-          const data = await res.json();
-          const found = data.versions.find(function(v){
-            if (this.toString() === 'latest') {
-              return true;
-            }
-            if (this.toString() === v.version) {
-              return true;
-            }
-            return v.version.startsWith(this + '.');
-          }, find ?? 'latest');
-          if (found == null) {
-            DOM.packageArea.textContent = '';
-          } else {
-            const link = found.links.self;
-            const res = await fetch(link);
+          const [pkgName, versionTag] = DOM.inputImportPackage.value.split('@');
+
+          try {
+            const res = await fetch(`https://data.jsdelivr.com/v1/packages/${source}/${pkgName}/`);
             const data = await res.json();
-            const readme = data.files.find(f => f.type === 'file' && f.name.toLowerCase() === 'readme.md');
-            if (readme == null) {
-              DOM.packageArea.textContent = '';
-            } else {
-              const res = await fetch(`https://cdn.jsdelivr.net/${source}/${package}/${readme.name}`);
-              const md = await res.text();
-              DOM.packageArea.innerHTML = marked.parse(md);
+            const found = data.versions.find(v => (versionTag || 'latest') === 'latest' ? true : v.version.startsWith(versionTag));
+
+            if (!found) {
+              DOM.packageArea.textContent = 'パッケージが見つかりません';
+              return;
             }
+
+            const resTree = await fetch(found.links.self);
+            const treeData = await resTree.json();
+
+            // ファイルリストの構築
+            const flatPaths = flattenJsdelivrFiles(treeData.files);
+            flatPaths.directories.forEach(path => {
+              const opt = document.createElement('option');
+              opt.value = path;
+              opt.textContent = path;
+              selectFile.appendChild(opt);
+            });
+
+            // READMEの表示
+            const readme = treeData.files.find(f => f.name.toLowerCase() === 'readme.md');
+            if (readme) {
+              const resMd = await fetch(`https://cdn.jsdelivr.net/${source}/${pkgName}@${found.version}/${readme.name}`);
+              DOM.packageArea.innerHTML = marked.parse(await resMd.text());
+            } else {
+              DOM.packageArea.textContent = 'READMEが見つかりません';
+            }
+
+            state.cdn = { source, name: pkgName, version: found.version, flatPaths };
             DOM.btnConfirmImportModal.disabled = false;
             DOM.btnConfirmImportModal.classList.remove('opacity-50', 'cursor-not-allowed');
-            state.cdn = data;
+
+          } catch (err) {
+            DOM.packageArea.textContent = 'エラー: ' + err.message;
           }
         }
 
         async function importFromJsdelivr() {
-          // TODO:
+          if (!state.cdn) return;
+
+          const sourcePath = document.getElementById('import-file-path').value; // CDN上の起点パス
+          const localDestPath = document.getElementById('import-local-dest').value; // ローカルの保存先パス
+
+          DOM.btnConfirmImportModal.disabled = true;
+          DOM.packageArea.textContent = 'インポート中...';
+
+          const { source, name, version, flatPaths } = state.cdn;
+          const baseUrl = `https://cdn.jsdelivr.net/${source}/${name}@${version}`;
+
+          try {
+            // 1. 対象となるファイルリストを絞り込み
+            // sourcePath が "/" の場合は全ファイル、それ以外は前方一致でフィルタ
+            const targets = flatPaths.files.filter(path => sourcePath === '/' || path.startsWith(sourcePath));
+
+            for (const filePath of targets) {
+              // CDNからファイル取得
+              const response = await fetch(`${baseUrl}${filePath}`);
+              if (!response.ok) throw new Error(`Failed to fetch: ${filePath}`);
+              const blob = await response.blob();
+
+              // 2. ローカル保存先のディレクトリを解決 (再帰的に作成)
+              const relativePath = sourcePath === '/' ? filePath.slice(1) : filePath.replace(sourcePath, '');
+              const pathParts = relativePath.split('/').filter(Boolean);
+              const fileName = pathParts.pop();
+
+              // 起点となるディレクトリハンドルを取得
+              let currentDirHandle = state.folders.get(localDestPath);
+
+              // 中間ディレクトリの作成
+              for (const part of pathParts) {
+                currentDirHandle = await currentDirHandle.getDirectoryHandle(part, { create: true });
+              }
+
+              // 3. ファイルの書き込み
+              const fileHandle = await currentDirHandle.getFileHandle(fileName, { create: true });
+              const writable = await fileHandle.createWritable();
+              await writable.write(blob);
+              await writable.close();
+            }
+
+            // 4. 後処理
+            DOM.packageArea.textContent = `${targets.length} 個のファイルをインポートしました。`;
+
+            // 全ディレクトリを再スキャンしてツリーを更新
+            await scanDirectory(state.rootHandle);
+            renderFileTree();
+            if (state.files.has('/' + SNIPPETS_FILENAME)) await updateSnippetUI();
+
+            setTimeout(() => {
+              hideImportModal();
+              DOM.btnConfirmImportModal.disabled = false;
+            }, 1500);
+
+          } catch (err) {
+            console.error(err);
+            DOM.packageArea.textContent = 'インポート失敗: ' + err.message;
+            DOM.btnConfirmImportModal.disabled = false;
+          }
         }
 
         /**
