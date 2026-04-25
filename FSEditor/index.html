@@ -7,6 +7,9 @@
     <!-- CodeMirror CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/theme/dracula.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/dialog/dialog.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/search/matchesonscrollbar.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/foldgutter.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.1.0/github-markdown-dark.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/gh/canvas-table/canvas-table@v1/HTMLCanvasTableElement.js"></script>
@@ -213,6 +216,16 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/htmlmixed/htmlmixed.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/markdown/markdown.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/dialog/dialog.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/search/searchcursor.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/search/search.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/search/jump-to-line.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/foldcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/foldgutter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/brace-fold.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/xml-fold.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/markdown-fold.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/addon/fold/comment-fold.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <script>
@@ -426,7 +439,7 @@
             }
         }
 
-        const SNIPPETS_FILENAME = 'snippets.txt';
+        const SNIPPETS_FILENAME = '.snippets';
         const DEFAULT_SNIPPETS = `カテゴリ別スニペット\n\n## Common\n\n### Console Log\nconsole.log('');\n`;
         const DB_NAME = 'FSEditorDB';
         const STORE_NAME = 'handles';
@@ -529,13 +542,21 @@
                 mode: 'javascript',
                 indentUnit: 2,
                 lineWrapping: true,
+                foldGutter: true, 
+                gutters: ["CodeMirror-linenumbers", "CodeMirror-foldgutter"],
                 extraKeys: {
                     "Tab": (cm) => {
                         if (cm.somethingSelected()) cm.execCommand("indentMore");
                         else cm.replaceSelection("  ");
                     },
                     "Ctrl-S": saveCurrentFile,
-                    "Cmd-S": saveCurrentFile
+                    "Cmd-S": saveCurrentFile,
+                    "Ctrl-F": "findPersistent",
+                    "Cmd-F": "findPersistent",
+                    "Ctrl-H": "replace",
+                    "Cmd-H": "replace",
+                    "Ctrl-G": "findNext",
+                    "Cmd-G": "findNext"
                 }
             });
 
@@ -692,7 +713,7 @@
                     DOM.snippetCategories.append(catWrapper);
                 }
             } catch (err) {
-                DOM.snippetCategories.innerHTML = '<div class="text-red-400 text-xs p-2">snippets.txt 読み込みエラー</div>';
+                DOM.snippetCategories.innerHTML = '<div class="text-red-400 text-xs p-2">.snippets 読み込みエラー</div>';
             }
         }
 
