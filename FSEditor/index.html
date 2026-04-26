@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.1.0/github-markdown-dark.min.css">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/gh/canvas-table/canvas-table@v1/HTMLCanvasTableElement.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/akabane-meifai/custom-elements@v1/HTMLAnsiElement.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.2.1/dist/sql-wasm.js" integrity="sha512-P3Yz5L06ijmktyFbUfhZmGriolebpOxxiNFgF+JtFj/wThktfoN1yjpKRBQfsPhA4Dl82ktp/XrOSSmGL1Bg3A==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
     <style>
         main img {
@@ -85,6 +86,49 @@
         .flex-table {
             flex: 3 3 0%;
         }
+      
+        /* コンソール出力のスタイル調整 */
+        #console-area {
+          font-family: 'Fira Code', monospace;
+          font-size: 12px;
+        }
+        .console-card {
+          border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          padding: 4px 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+        }
+        .console-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 10px;
+        }
+        .console-tag {
+          padding: 1px 4px;
+          border-radius: 3px;
+          text-transform: uppercase;
+          font-weight: bold;
+        }
+        .console-time { color: #6272a4; }
+        .console-macro-name { color: #8be9fd; font-weight: bold; }
+
+        /* ログレベル別 */
+        .log-bg { background: transparent; }
+        .log-tag { background: #44475a; color: #f8f8f2; }
+
+        .info-bg { background: rgba(139, 233, 253, 0.05); }
+        .info-tag { background: #8be9fd; color: #282a36; }
+        .info-text { color: #8be9fd; }
+
+        .warn-bg { background: rgba(255, 184, 108, 0.1); }
+        .warn-tag { background: #ffb86c; color: #282a36; }
+        .warn-text { color: #ffb86c; }
+
+        .error-bg { background: rgba(255, 85, 85, 0.15); }
+        .error-tag { background: #ff5555; color: #f8f8f2; }
+        .error-text { color: #ff5555; }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-100 h-screen flex flex-col overflow-hidden">
@@ -137,7 +181,12 @@
 
             <!-- Macro List Container -->
             <div id="macro-list-container" class="hidden flex-1 overflow-y-auto p-2">
-                <div class="text-xs font-semibold text-gray-500 uppercase mb-4 px-2">登録済みマクロ</div>
+                <div class="flex items-start justify-between space-x-4 mb-3 px-2">  
+                  <div class="text-xs font-semibold text-gray-500 uppercase">登録済みマクロ</div>
+                  <button id="btn-console" class="bg-indigo-600 hover:bg-indigo-700 text-xs text-white px-3 py-1 rounded text-sm transition">
+                    コンソール
+                  </button>
+                </div>
                 <div id="macro-list" class="space-y-2"></div>
             </div>
         </aside>
@@ -212,6 +261,22 @@
             <button id="btn-check-import-modal" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold">パッケージを確認</button>
             <button id="btn-confirm-import-modal" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold opacity-50 cursor-not-allowed" disabled>インポート</button>
           </div>
+      </div>
+    </div>
+  
+    <!-- Modal for Console -->
+    <div id="modal-console-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+      <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-auto border border-gray-700">
+        <h2 id="modal-title" class="text-lg font-bold mb-4">コンソール</h2>
+
+        <div class="w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
+          <div id="console-area"></div>
+        </div>
+        
+        <div class="flex justify-end space-x-3">
+          <button id="btn-cancel-console-modal" class="text-gray-400 hover:text-white text-sm px-2">閉じる</button>
+          <button id="btn-clear-console" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-bold">コンソールのクリア</button>
+        </div>
       </div>
     </div>
 
@@ -541,7 +606,12 @@
             viewDatabase: document.getElementById('view-database'),
             tabMacros: document.getElementById('tab-macros'),
             containerMacros: document.getElementById('macro-list-container'),
-            macroList: document.getElementById('macro-list')
+            macroList: document.getElementById('macro-list'),
+            btnConsole: document.getElementById('btn-console'),
+            modalConsole: document.getElementById('modal-console-overlay'),
+            btnCancelConsoleModal: document.getElementById('btn-cancel-console-modal'),
+            ConsoleArea: document.getElementById('console-area'),
+            btnClearConsole: document.getElementById('btn-clear-console')
         };
 
         /**
@@ -1316,7 +1386,7 @@
           
           // Blobを利用してWorkerを作成
           const blob = new Blob([
-            "self.onmessage = e => { const Editor = { port: e.ports[0], seq: 0, async request(type, payload = {}) { const port = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data.requestId === requestId) { port.removeEventListener('message', handler); ev.data.success ? resolve(ev.data.result) : reject(ev.data.error); } }; port.addEventListener('message', handler); port.postMessage({ type, payload, requestId }); }); } }; Editor.port.start(); (async () => { try {\n",
+            "self.onmessage = e => { const Editor = { port: e.ports[0], seq: 0, async request(type, payload = {}) { const port = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data.requestId === requestId) { port.removeEventListener('message', handler); ev.data.success ? resolve(ev.data.result) : reject(ev.data.error); } }; port.addEventListener('message', handler); port.postMessage({ type, payload, requestId }); }); }, log(message) { return this.request('write_console', { text: message, type: 'log' }); }, info(message) { return this.request('write_console', { text: message, type: 'info' }); }, error(message) { return this.request('write_console', { text: message, type: 'error' }); }, warn(message) { return this.request('write_console', { text: message, type: 'warn' }); } }; Editor.port.start(); (async () => { try {\n",
             macroData.content,
             "\nconsole.log('Macro finished successfully'); } catch (err) { console.error('Macro Error:', err); } finally { self.close(); } })(); };"
           ], { type: 'application/javascript' });
@@ -1349,6 +1419,9 @@
                   await writable.close();
                   fileData.isDirty = false;
                   renderFileTree();
+              },
+              async write_console({ text, type }){
+                  writeConsole(text, type, macroData);
               }
           };
       
@@ -1365,6 +1438,64 @@
           };
       
           worker.postMessage({ type: 'init' }, [channel.port1]);
+        }
+
+        function showConsoleModal() {
+          DOM.modalConsole.classList.remove('hidden');
+        }
+
+        function hideConsoleModal() {
+          DOM.modalConsole.classList.add('hidden');
+        }
+      
+        function writeConsole(text, type = 'log', macroData = null) {
+          const card = document.createElement('div');
+          const header = document.createElement('div');
+          const msgContainer = document.createElement('div');
+          const msgText = document.createElement('ansi-span');
+
+          // 現在時刻の取得 (HH:mm:ss)
+          const now = new Date();
+          const timeStr = now.toTimeString().split(' ')[0];
+
+          // タイプに応じたクラス設定
+          const typeLower = type.toLowerCase();
+          const bgClass = `${typeLower}-bg`;
+          const tagClass = `${typeLower}-tag`;
+          const textClass = `${typeLower}-text`;
+          const consoleTime = document.createElement('span');
+          const consoleTag = document.createElement('span');
+
+          card.className = `console-card ${bgClass}`;
+          consoleTime.classList.add('console-time');
+          consoleTime.textContent = typeLower;
+          consoleTag.classList.add('console-tag', tagClass);
+          consoleTag.textContent = timeStr;
+          header.classList.add('console-header');
+          header.append(consoleTime, consoleTag);
+          
+          if (macroData != null) {
+            const consoleMacroName = document.createElement('span');
+            consoleMacroName.classList.add('console-macro-name');
+            consoleMacroName.textContent = macroData.name;
+            header.append(consoleMacroName);
+          }
+          msgContainer.classList.add('px-1', textClass);
+          msgContainer.appendChild(msgText);
+          card.appendChild(header);
+          card.appendChild(msgContainer);
+
+          DOM.ConsoleArea.appendChild(card);
+          msgText.textContent = text;
+
+          // 最新のログへスクロール
+          DOM.ConsoleArea.parentElement.scrollTop = DOM.ConsoleArea.parentElement.scrollHeight;
+
+          showConsoleModal();
+        }
+
+        function clearConsole() {
+          DOM.ConsoleArea.innerHTML = '';
         }
       
         /**
@@ -1416,6 +1547,9 @@
             DOM.btnCancelImportModal.onclick = hideImportModal;
             DOM.btnCheckImportModal.onclick = listFromJsdelivr;
             DOM.btnConfirmImportModal.onclick = importFromJsdelivr;
+            DOM.btnConsole.onclick = showConsoleModal;
+            DOM.btnCancelConsoleModal.onclick = hideConsoleModal;
+            DOM.btnClearConsole.onclick = clearConsole;
             
             DOM.typeFile.onclick = () => setCreateType('file');
             DOM.typeFolder.onclick = () => setCreateType('folder');
