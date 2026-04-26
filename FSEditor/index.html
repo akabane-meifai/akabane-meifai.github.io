@@ -633,6 +633,7 @@
                         if (cm.somethingSelected()) cm.execCommand("indentMore");
                         else cm.replaceSelection("  ");
                     },
+                    "Shift-Tab": "indentLess",
                     "Ctrl-S": saveCurrentFile,
                     "Cmd-S": saveCurrentFile,
                     "Ctrl-F": "findPersistent",
@@ -668,7 +669,7 @@
                         event.preventDefault();
                         const indent = indentMatch[0];
                         const formatted = lines.join('\n' + indent);
-                        cmInstance.replaceRange(formatted, cursor);
+                        cmInstance.replaceSelection(formatted);
                     }
                 }
             });
