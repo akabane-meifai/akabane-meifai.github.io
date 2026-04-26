@@ -271,6 +271,7 @@
 
         <div class="w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
           <div id="console-area"></div>
+          <div id="console-form"></div>
         </div>
         
         <div class="flex justify-end space-x-3">
@@ -611,7 +612,8 @@
             modalConsole: document.getElementById('modal-console-overlay'),
             btnCancelConsoleModal: document.getElementById('btn-cancel-console-modal'),
             ConsoleArea: document.getElementById('console-area'),
-            btnClearConsole: document.getElementById('btn-clear-console')
+            btnClearConsole: document.getElementById('btn-clear-console'),
+            ConsoleForm: document.getElementById('console-form')
         };
 
         /**
@@ -1384,9 +1386,20 @@
           console.log(`Running macro: ${macroData.name}`);
           const permissions = new Set(macroData.permissions);
           
+          // Editor追加メソッド
+          let editoerMethod = '';
+          // if (permissions.has('permission')) {
+          //   editoerMethod += ", method(){ return this.request('method', { key: value }); }";
+          // }
+          if (permissions.has('console_input')) {
+            editoerMethod += ", input(message = '入力', type = 'text', data = null){ return this.request('request_input', { message, type, data }); }";
+          }
+          
           // Blobを利用してWorkerを作成
           const blob = new Blob([
-            "self.onmessage = e => { const Editor = { port: e.ports[0], seq: 0, async request(type, payload = {}) { const port = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data.requestId === requestId) { port.removeEventListener('message', handler); ev.data.success ? resolve(ev.data.result) : reject(ev.data.error); } }; port.addEventListener('message', handler); port.postMessage({ type, payload, requestId }); }); }, log(message) { return this.request('write_console', { text: message, type: 'log' }); }, info(message) { return this.request('write_console', { text: message, type: 'info' }); }, error(message) { return this.request('write_console', { text: message, type: 'error' }); }, warn(message) { return this.request('write_console', { text: message, type: 'warn' }); } }; Editor.port.start(); (async () => { try {\n",
+            "self.onmessage = e => { const Editor = { port: e.ports[0], seq: 0, async request(type, payload = {}) { const port = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data.requestId === requestId) { port.removeEventListener('message', handler); ev.data.success ? resolve(ev.data.result) : reject(ev.data.error); } }; port.addEventListener('message', handler); port.postMessage({ type, payload, requestId }); }); }, log(message) { return this.request('write_console', { text: message, type: 'log' }); }, info(message) { return this.request('write_console', { text: message, type: 'info' }); }, error(message) { return this.request('write_console', { text: message, type: 'error' }); }, warn(message) { return this.request('write_console', { text: message, type: 'warn' }); }",
+            editoerMethod,
+            " }; Editor.port.start(); (async () => { try {\n",
             macroData.content,
             "\nconsole.log('Macro finished successfully'); } catch (err) { console.error('Macro Error:', err); } finally { self.close(); } })(); };"
           ], { type: 'application/javascript' });
@@ -1420,8 +1433,66 @@
                   fileData.isDirty = false;
                   renderFileTree();
               },
-              async write_console({ text, type }){
+              async write_console({ text, type }) {
                   writeConsole(text, type, macroData);
+              },
+              request_input({ message, type, data }) {
+                  if (!permissions.has('console_input')) throw "Permission denied: console_input";
+              
+                  return new Promise((resolve) => {
+                      // コンソールを表示
+                      showConsoleModal();
+              
+                      const formWrapper = document.createElement('div');
+                      formWrapper.className = 'p-3 bg-gray-800 border border-blue-500 rounded-md my-2 shadow-lg';
+                      
+                      const label = document.createElement('div');
+                      label.className = 'text-xs text-blue-300 mb-2 font-bold';
+                      label.textContent = `> ${message}`;
+                      formWrapper.appendChild(label);
+              
+                      const cleanUp = (label, value) => {
+                          formWrapper.remove();
+                          // 入力した結果をログとして残す
+                          writeConsole(`${message}: ${label}`, 'info', macroData);
+                          resolve(value);
+                      };
+              
+                      if (type === 'button' && Array.isArray(data)) {
+                          // ボタン選択形式
+                          const btnContainer = document.createElement('div');
+                          btnContainer.className = 'flex flex-wrap gap-2';
+                          data.forEach(([label, value]) => {
+                              const btn = document.createElement('button');
+                              btn.className = 'bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded transition';
+                              btn.textContent = label;
+                              btn.onclick = () => cleanUp(label, value);
+                              btnContainer.appendChild(btn);
+                          });
+                          formWrapper.appendChild(btnContainer);
+                      } else {
+                          // テキスト・マルチライン入力形式
+                          const input = document.createElement(type === 'multiline' ? 'textarea' : 'input');
+                          input.className = 'w-full bg-gray-900 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:border-blue-500 outline-none';
+                          if (type !== 'multiline') input.type = 'text';
+                          
+                          const submitBtn = document.createElement('button');
+                          submitBtn.className = 'mt-2 bg-green-600 hover:bg-green-500 text-white text-xs px-4 py-1 rounded block ml-auto';
+                          submitBtn.textContent = '確定';
+                          
+                          const handleFinish = () => cleanUp(input.value, input.value);
+                          submitBtn.onclick = handleFinish;
+                          input.onkeypress = (e) => { if(e.key === 'Enter' && type !== 'multiline') handleFinish(); };
+              
+                          formWrapper.appendChild(input);
+                          formWrapper.appendChild(submitBtn);
+                          setTimeout(() => input.focus(), 100);
+                      }
+              
+                      DOM.ConsoleForm.appendChild(formWrapper);
+                      // 最新位置へスクロール
+                      DOM.ConsoleForm.parentElement.scrollTop = DOM.ConsoleForm.parentElement.scrollHeight;
+                  });
               }
           };
       
