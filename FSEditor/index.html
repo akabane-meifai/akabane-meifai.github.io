@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -1411,28 +1412,101 @@
           const apiHandlers = {
               async get_editor_value() {
                   if (!permissions.has('editor_read')) throw "Permission denied: editor_read";
+                  if (state.activeFilePath.startsWith(MACRO_DIR + '/')) {
+                      return;
+                  }
                   return state.editor.getValue();
               },
               async set_editor_value({ value }) {
                   if (!permissions.has('editor_write')) throw "Permission denied: editor_write";
+                  if (state.activeFilePath.startsWith(MACRO_DIR + '/')) {
+                      return;
+                  }
                   state.editor.setValue(value);
               },
-              async read_file({ filePath }) {
-                  if (!permissions.has('file_read')) throw "Permission denied: file_read";
-                  const fileData = state.files.get(filePath);
-                  if (!fileData) throw "File not found";
-                  const file = await fileData.handle.getFile();
-                  return await file.text();
+              async open_file({ filePath }) {
+                if (!permissions.has('file_open')) throw "Permission denied: file_open";
+                if (filePath.startsWith(MACRO_DIR + '/')) {
+                    return false;
+                }
+                await openFile(filePath);
+                return filePath === state.activeFilePath;
               },
-              async write_file({ filePath, content }) {
-                  if (!permissions.has('file_write')) throw "Permission denied: file_write";
-                  const fileData = state.files.get(filePath);
-                  if (!fileData) throw "File not found";
-                  const writable = await fileData.handle.createWritable();
-                  await writable.write(content);
-                  await writable.close();
-                  fileData.isDirty = false;
-                  renderFileTree();
+              async get_files() {
+                if (!permissions.has('stat')) throw "Permission denied: stat";
+                return Array.from(state.files.keys());
+              },
+              async get_folders() {
+                if (!permissions.has('stat')) throw "Permission denied: stat";
+                return Array.from(state.folders.keys());
+              },
+              async put_file({ path, data }) {
+                if (!permissions.has('write')) throw "Permission denied: write";
+
+                // パスをパース
+                const parts = path.split('/').filter(Boolean);
+                const fileName = parts.pop();
+                const folderPath = '/' + parts.join('/');
+                const fullPath = (folderPath === '/' ? '' : folderPath) + '/' + fileName;
+                if (fullPath.startsWith(MACRO_DIR + '/')) {
+                    return false;
+                }
+
+                // 親フォルダのハンドルを取得
+                let parentHandle = state.folders.get(folderPath);
+                if (!parentHandle) {
+                    throw `Directory not found: ${folderPath}. Please create folders first.`;
+                }
+
+                try {
+                    // ファイルの作成/取得
+                    const fileHandle = await parentHandle.getFileHandle(fileName, { create: true });
+                    const writable = await fileHandle.createWritable();
+                    await writable.write(data);
+                    await writable.close();
+
+                    // アプリケーション状態の更新
+                    if (!state.files.has(fullPath)) {
+                        state.files.set(fullPath, { handle: fileHandle, doc: null, data: null, isDirty: false });
+                    } else {
+                        // 既に開いているファイルなら、dirtyフラグを下ろすなどの処理が必要に応じて可能
+                        const fileData = state.files.get(fullPath);
+                        fileData.isDirty = false;
+                    }
+
+                    renderFileTree(); // サイドバー更新
+                    return true;
+                } catch (err) {
+                    throw `Failed to write file: ${err.toString()}`;
+                }
+              },
+              async create_folder({ path }) {
+                if (!permissions.has('write')) throw "Permission denied: write";
+
+                const parts = path.split('/').filter(Boolean);
+                let currentPath = '';
+                let currentHandle = state.rootHandle;
+
+                try {
+                    for (const part of parts) {
+                        const parentPath = currentPath || '/';
+                        currentPath += '/' + part;
+
+                        // ディレクトリを作成（既存なら取得）
+                        currentHandle = await currentHandle.getDirectoryHandle(part, { create: true });
+
+                        // 状態に未登録なら追加
+                        if (!state.folders.has(currentPath)) {
+                            state.folders.set(currentPath, currentHandle);
+                            state.expandedFolders.add(parentPath); // 親を展開状態にする
+                        }
+                    }
+
+                    renderFileTree(); // サイドバー更新
+                    return true;
+                } catch (err) {
+                    throw `Failed to create directory: ${err.toString()}`;
+                }
               },
               async write_console({ text, type }) {
                   writeConsole(text, type, macroData);
