@@ -1423,7 +1423,7 @@
           
           // Blobを利用してWorkerを作成
           const blob = new Blob([
-            "self.onmessage = e => { self.Editor = { port: e.ports && e.ports[0], seq: 0, async request(type, payload = {}) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }); }); },",
+            "self.onmessage = e => { self.Editor = { port: e.ports && e.ports[0], env: e.data.env, seq: 0, async request(type, payload = {}) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }); }); },",
             editoerMethods.join(', '),
             " }; const proxy = new Proxy(self, { get: (target, prop) => { if (prop === Symbol.unscopables) return void(0); switch (prop) { ",
             workerWhitelist1,
@@ -1644,7 +1644,30 @@
               }
           };
       
-          worker.postMessage({ type: 'init' }, [channel.port1]);
+          let workerEnv = null;
+          if (permissions.has('env')) {
+              const fileData = state.files.get(MACRO_DIR + '/.env');
+              if (!fileData) {
+                  workerEnv = {};
+              } else {
+                  const file = await fileData.handle.getFile();
+                  const text = await file.text();
+                  let match = null;
+                  const LINE = /(?:^|^)\s*(?:export\s+)?([\w.-]+)(?:\s*=\s*?|:\s+?)(\s*'(?:\\'|[^'])*'|\s*"(?:\\"|[^"])*"|\s*`(?:\\`|[^`])*`|[^#\r\n]+)?\s*(?:#.*)?(?:$|$)/mg;
+                  workerEnv = {};
+                  while ((match = LINE.exec(text.replace(/\r\n?/mg, '\n'))) != null) {
+                      const key = match[1];
+                      let value = (match[2] || '').trim();
+                      const maybeQuote = value[0];
+                      value = value.replace(/^(['"`])([\s\S]*)\1$/mg, '$2');
+                      if (maybeQuote === '"') {
+                          value = value.replace(/\\n/g, '\n').replace(/\\r/g, '\r');
+                      }
+                      workerEnv[key] = value;
+                  }
+              }
+          }
+          worker.postMessage({ type: 'init', env: workerEnv }, [channel.port1]);
         }
 
         function showConsoleModal() {
