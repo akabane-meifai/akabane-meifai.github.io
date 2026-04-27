@@ -1716,7 +1716,57 @@
           card.appendChild(msgContainer);
 
           DOM.ConsoleArea.appendChild(card);
-          msgText.textContent = text;
+          if (typeof text === 'string') {
+              msgText.textContent = text;
+          } else {
+              let objText = '';
+              let nest = 0;
+              toObjText(text);
+              msgText.textContent = objText;
+              function toObjText(data) {
+                  if (data == null) {
+                      objText += "\x1B[90mnull\x1B[0m";
+                  } else if (typeof data === 'string') {
+                      objText += "\x1B[93m" + JSON.stringify(data) + "\x1B[0m";
+                  } else if (typeof data === 'boolean') {
+                      objText += "\x1B[94m" + (data ? "true" : "false") + "\x1B[0m";
+                  } else if (typeof data === 'number') {
+                      objText += "\x1B[95m" + data.toString() + "\x1B[0m";
+                  } else if (Array.isArray(data)) {
+                      const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
+                      let first = true;
+                      objText += '[';
+                      for (const item of data) {
+                          if (first) {
+                              first = false;
+                          } else {
+                              objText += ',';
+                          }
+                          objText += sp;
+                          toObjText(item);
+                      }
+                      nest--;
+                      objText += first ? ']' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + ']');
+                  } else if (typeof data.toJSON === 'function') {
+                      toObjText(data.toJSON());
+                  } else if (typeof data === 'object') {
+                      const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
+                      let first = true;
+                      objText += '{';
+                      for (const [k, v] of Object.entries(data)) {
+                          if (first) {
+                              first = false;
+                          } else {
+                              objText += ',';
+                          }
+                          objText += sp + "\x1B[92m" + k + "\x1B[0m: ";
+                          toObjText(v);
+                      }
+                      nest--;
+                      objText += first ? '}' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + '}');
+                  }
+              }
+          }
 
           // 最新のログへスクロール
           DOM.ConsoleArea.parentElement.scrollTop = DOM.ConsoleArea.parentElement.scrollHeight;
