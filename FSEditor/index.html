@@ -1397,6 +1397,12 @@
           if (permissions.has('console_input')) {
             editoerMethods.push("input(message = '入力', type = 'text', data = null){ return this.request('request_input', { message, type, data }); }");
           }
+          if (permissions.has('sql_query')) {
+            editoerMethods.push("query(sql){ return this.request('sql_query', { sql }); }");
+          }
+          if (permissions.has('sql_commit')) {
+            editoerMethods.push("commit(){ return this.request('sql_commit'); }");
+          }
           
           // Worker内ホワイトリスト
           const workerWhitelist1 = [
@@ -1590,6 +1596,39 @@
                       // 最新位置へスクロール
                       DOM.ConsoleForm.parentElement.scrollTop = DOM.ConsoleForm.parentElement.scrollHeight;
                   });
+              },
+              async sql_query({ sql }) {
+                  if (!permissions.has('sql_query')) throw "Permission denied: sql_query";
+
+                  // 現在アクティブなファイルデータを取得
+                  const fileData = state.files.get(state.activeFilePath);
+                  if (!fileData || !fileData.data || !fileData.data.db) {
+                      // SQLite データベースが開かれていない場合は false を返す
+                      return false;
+                  }
+                  try {
+                      const db = fileData.data.db;
+                      const results = db.exec(sql);
+                      return results; // クエリ結果を配列で返す
+                  } catch (err) {
+                      throw `SQL Error: ${err.toString()}`;
+                  }
+              },
+              async sql_commit() {
+                  if (!permissions.has('sql_commit')) throw "Permission denied: sql_commit";
+
+                  const fileData = state.files.get(state.activeFilePath);
+                  if (!fileData || !fileData.data || !fileData.data.db) {
+                      return false;
+                  }
+                  try {
+                      const data = fileData.data.db.export();
+                      const writable = await fileData.handle.createWritable();
+                      await writable.write(fileData.data.db.export());
+                      return true; 
+                  } catch (err) {
+                      throw `SQL Save Error: ${err.toString()}`;
+                  }
               }
           };
       
