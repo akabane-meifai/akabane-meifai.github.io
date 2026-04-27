@@ -1406,26 +1406,26 @@
             'Float16Array', 'Float32Array', 'Float64Array', 'FormData', 'Headers',
             'Int8Array', 'Int16Array', 'Int32Array', 'JSON', 'Map', 'Math',
             'MessagePort', 'Number', 'Object', 'Promise', 'Proxy', 'ReadableStream',
-            'RegExp', 'Request', 'Response', 'Set', 'String', 'Symbol', 'console',
+            'RegExp', 'Request', 'Response', 'Set', 'String', 'Symbol',
             'URL', 'Uint8Array', 'Uint8ClampedArray', 'Uint16Array', 'Uint32Array',
-            'WeakMap', 'WeakRef', 'WeakSet'
+            'WeakMap', 'WeakRef', 'WeakSet', 'Editor'
           ].map(o => `case '${o}':`).join(" ");
           
           // Worker内ホワイトリスト（selfを束縛する）
-          const workerWhitelist2 = ['fetch', 'close']
+          const workerWhitelist2 = ['fetch']
             .map(o => `case '${o}':`).join(" ");
           
           // Blobを利用してWorkerを作成
           const blob = new Blob([
-            "self.onmessage = e => { const proxy = new Proxy(self, { get: (target, prop) => { if (prop === Symbol.unscopables) return void(0); switch (prop) { ",
-            workerWhitelist1,
-            " return target[prop]; case 'port': return e.ports && e.ports[0]; ",
-            workerWhitelist2,
-            " return target[prop].bind(target); case 'self': return proxy; } throw new Error(`SecurityError: Access to ${String(prop)} is blocked.`); }, has: () => true }); with (proxy) { const Editor = { seq: 0, async request(type, payload = {}) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }); }); },",
+            "self.onmessage = e => { self.Editor = { port: e.ports && e.ports[0], seq: 0, async request(type, payload = {}) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }); }); },",
             editoerMethods.join(', '),
-            " }; if (Editor.port = self.port) { Editor.port.start(); } (async () => { try {\n",
+            " }; const proxy = new Proxy(self, { get: (target, prop) => { if (prop === Symbol.unscopables) return void(0); switch (prop) { ",
+            workerWhitelist1,
+            " return target[prop]; ",
+            workerWhitelist2,
+            " return target[prop].bind(target); case 'self': return proxy; } throw new Error(`SecurityError: Access to ${String(prop)} is blocked.`); }, has: () => true }); if (Editor.port) { Editor.port.start(); } (async () => { try { with (proxy) {\n",
             macroData.content,
-            "\nconsole.log('Macro finished successfully'); } catch (err) { console.error('Macro Error:', err); } finally { self.close(); } })(); } };"
+            "\n} console.log('Macro finished successfully'); } catch (err) { console.error('Macro Error:', err); } finally { self.close(); } })(); };"
           ], { type: 'application/javascript' });
           const worker = new Worker(URL.createObjectURL(blob));
           const channel = new MessageChannel();
