@@ -31,3 +31,5 @@
 | write | 指定したフォルダの作成、ファイルの上書き保存 | `create_folder`,`put_file` |
 | sql_query | アクティブなSQLiteのクエリ実行 | `Editor.query` |
 | sql_commit | アクティブなSQLiteの保存 | `Editor.commit` |
+| rich_console | リッチコンソール出力 | コンソール出力機能（`Editor.mdLog`） |
+
