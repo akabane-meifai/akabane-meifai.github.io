@@ -1389,10 +1389,11 @@
           
           // Editor追加メソッド
           const editoerMethods = [
-            "log(message) { return this.request('write_console', { text: message, type: 'log' }); }",
-            "info(message) { return this.request('write_console', { text: message, type: 'info' }); }",
-            "warn(message) { return this.request('write_console', { text: message, type: 'warn' }); }",
-            "error(message) { return this.request('write_console', { text: message, type: 'error' }); }",
+            "log(message) { return this.request('write_console', { text: message, type: 'log' }, (message instanceof ReadableStream) ? [message] : []); }",
+            "info(message) { return this.request('write_console', { text: message, type: 'info' }, (message instanceof ReadableStream) ? [message] : []); }",
+            "warn(message) { return this.request('write_console', { text: message, type: 'warn' }, (message instanceof ReadableStream) ? [message] : []); }",
+            "error(message) { return this.request('write_console', { text: message, type: 'error' }, (message instanceof ReadableStream) ? [message] : []); }",
+            "wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }"
           ];
           if (permissions.has('console_input')) {
             editoerMethods.push("input(message = '入力', type = 'text', data = null){ return this.request('request_input', { message, type, data }); }");
@@ -1423,7 +1424,7 @@
           
           // Blobを利用してWorkerを作成
           const blob = new Blob([
-            "self.onmessage = e => { self.Editor = { port: e.ports && e.ports[0], env: e.data.env, seq: 0, async request(type, payload = {}) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }); }); },",
+            "self.onmessage = e => { self.Editor = { port: e.ports && e.ports[0], env: e.data.env, seq: 0, async request(type, payload = {}, transfer = []) { const currentPort = this.port; const requestId = ++this.seq; return new Promise((resolve, reject) => { const handler = ev => { if (ev.data && ev.data.requestId === requestId) { currentPort.removeEventListener('message', handler); if (ev.data.success) { resolve(ev.data.result); } else { reject(ev.data.error); } } }; currentPort.addEventListener('message', handler); currentPort.postMessage({ type, payload, requestId }, transfer); }); },",
             editoerMethods.join(', '),
             " }; const proxy = new Proxy(self, { get: (target, prop) => { if (prop === Symbol.unscopables) return void(0); switch (prop) { ",
             workerWhitelist1,
@@ -1678,11 +1679,10 @@
           DOM.modalConsole.classList.add('hidden');
         }
       
-        function writeConsole(text, type = 'log', macroData = null) {
+        function writeConsole(data, type = 'log', macroData = null) {
           const card = document.createElement('div');
           const header = document.createElement('div');
           const msgContainer = document.createElement('div');
-          const msgText = document.createElement('ansi-span');
 
           // 現在時刻の取得 (HH:mm:ss)
           const now = new Date();
@@ -1711,67 +1711,75 @@
             header.append(consoleMacroName);
           }
           msgContainer.classList.add('px-1', textClass);
-          msgContainer.appendChild(msgText);
           card.appendChild(header);
           card.appendChild(msgContainer);
 
           DOM.ConsoleArea.appendChild(card);
-          if (typeof text === 'string') {
-              msgText.textContent = text;
+          if (data instanceof ReadableStream){
+              data.pipeTo(new WritableStream({ write }));
           } else {
-              let objText = '';
-              let nest = 0;
-              toObjText(text);
-              msgText.textContent = objText;
-              function toObjText(data) {
-                  if (data == null) {
-                      objText += "\x1B[90mnull\x1B[0m";
-                  } else if (typeof data === 'string') {
-                      objText += "\x1B[93m" + JSON.stringify(data) + "\x1B[0m";
-                  } else if (typeof data === 'boolean') {
-                      objText += "\x1B[94m" + (data ? "true" : "false") + "\x1B[0m";
-                  } else if (typeof data === 'number') {
-                      objText += "\x1B[95m" + data.toString() + "\x1B[0m";
-                  } else if (Array.isArray(data)) {
-                      const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
-                      let first = true;
-                      objText += '[';
-                      for (const item of data) {
-                          if (first) {
-                              first = false;
-                          } else {
-                              objText += ',';
+              write(data);
+          }
+          function write(text) {
+              const msgText = document.createElement('ansi-span');
+              msgContainer.appendChild(msgText);
+              if (typeof text === 'string') {
+                  msgText.textContent = text;
+              } else {
+                  let objText = '';
+                  let nest = 0;
+                  toObjText(text);
+                  msgText.textContent = objText;
+                  function toObjText(data) {
+                      if (data == null) {
+                          objText += "\x1B[90mnull\x1B[0m";
+                      } else if (typeof data === 'string') {
+                          objText += "\x1B[93m" + JSON.stringify(data) + "\x1B[0m";
+                      } else if (typeof data === 'boolean') {
+                          objText += "\x1B[94m" + (data ? "true" : "false") + "\x1B[0m";
+                      } else if (typeof data === 'number') {
+                          objText += "\x1B[95m" + data.toString() + "\x1B[0m";
+                      } else if (Array.isArray(data)) {
+                          const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
+                          let first = true;
+                          objText += '[';
+                          for (const item of data) {
+                              if (first) {
+                                  first = false;
+                              } else {
+                                  objText += ',';
+                              }
+                              objText += sp;
+                              toObjText(item);
                           }
-                          objText += sp;
-                          toObjText(item);
-                      }
-                      nest--;
-                      objText += first ? ']' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + ']');
-                  } else if (typeof data.toJSON === 'function') {
-                      toObjText(data.toJSON());
-                  } else if (typeof data === 'object') {
-                      const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
-                      let first = true;
-                      objText += '{';
-                      for (const [k, v] of Object.entries(data)) {
-                          if (first) {
-                              first = false;
-                          } else {
-                              objText += ',';
+                          nest--;
+                          objText += first ? ']' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + ']');
+                      } else if (typeof data.toJSON === 'function') {
+                          toObjText(data.toJSON());
+                      } else if (typeof data === 'object') {
+                          const sp = "\n" + Array.from({length: ++nest}, _ => '  ').join('');
+                          let first = true;
+                          objText += '{';
+                          for (const [k, v] of Object.entries(data)) {
+                              if (first) {
+                                  first = false;
+                              } else {
+                                  objText += ',';
+                              }
+                              objText += sp + "\x1B[92m" + k + "\x1B[0m: ";
+                              toObjText(v);
                           }
-                          objText += sp + "\x1B[92m" + k + "\x1B[0m: ";
-                          toObjText(v);
+                          nest--;
+                          objText += first ? '}' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + '}');
                       }
-                      nest--;
-                      objText += first ? '}' : ("\n" + Array.from({length: nest}, _ => '  ').join('') + '}');
                   }
               }
+
+              // 最新のログへスクロール
+              DOM.ConsoleArea.parentElement.scrollTop = DOM.ConsoleArea.parentElement.scrollHeight;
+
+              showConsoleModal();
           }
-
-          // 最新のログへスクロール
-          DOM.ConsoleArea.parentElement.scrollTop = DOM.ConsoleArea.parentElement.scrollHeight;
-
-          showConsoleModal();
         }
 
         function clearConsole() {
