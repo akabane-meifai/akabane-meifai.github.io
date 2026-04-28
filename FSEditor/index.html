@@ -209,7 +209,7 @@
     <!-- Modal for New File/Folder -->
     <div id="modal-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
         <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-80 border border-gray-700">
-            <h2 id="modal-title" class="text-lg font-bold mb-4">新規作成</h2>
+            <h2 class="text-lg font-bold mb-4">新規作成</h2>
             
             <div class="flex mb-4 bg-gray-900 rounded p-1">
                 <button id="type-file" class="create-type-btn flex-1 py-1 text-xs rounded transition-colors active">ファイル</button>
@@ -230,7 +230,7 @@
     <!-- Modal for Import -->
     <div id="modal-import-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
       <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-auto border border-gray-700">
-          <h2 id="modal-title" class="text-lg font-bold mb-4">インポート</h2>
+          <h2 class="text-lg font-bold mb-4">インポート</h2>
 
           <div class="text-xs text-blue-400 mb-2 truncate">CDN: ソースを選択</div>
           <div class="import-container">
@@ -267,7 +267,7 @@
     <!-- Modal for Console -->
     <div id="modal-console-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
       <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-auto border border-gray-700">
-        <h2 id="modal-title" class="text-lg font-bold mb-4">コンソール</h2>
+        <h2 class="text-lg font-bold mb-4">コンソール</h2>
 
         <div class="w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4">
           <div id="console-area"></div>
@@ -280,6 +280,20 @@
         </div>
       </div>
     </div>
+  
+      <!-- Modal for Macro Info -->
+      <div id="modal-macro-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-auto border border-gray-700">
+          <h2 class="text-lg font-bold mb-4">マクロ情報</h2>
+  
+          <div id="macro-area" class="w-[40rem] max-w-full h-80 overflow-auto bg-gray-900/50 p-2 rounded border border-gray-700 mb-4"></div>
+          
+          <div class="flex justify-end space-x-3">
+            <button id="btn-cancel-macro-modal" class="text-gray-400 hover:text-white text-sm px-2">閉じる</button>
+            <button id="btn-run-macro" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-bold">このマクロを実行</button>
+          </div>
+        </div>
+      </div>
 
     <!-- CodeMirror & Modes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.18/codemirror.min.js"></script>
@@ -590,6 +604,7 @@
             pathDisplay: document.getElementById('current-file-path'),
             modal: document.getElementById('modal-overlay'),
             modalImport: document.getElementById('modal-import-overlay'),
+            modalMacro: document.getElementById('modal-macro-overlay'),
             targetFolderDisplay: document.getElementById('target-folder-display'),
             btnCancelModal: document.getElementById('btn-cancel-modal'),
             btnConfirmModal: document.getElementById('btn-confirm-modal'),
@@ -597,6 +612,7 @@
             btnCancelImportModal: document.getElementById('btn-cancel-import-modal'),
             btnCheckImportModal: document.getElementById('btn-check-import-modal'),
             btnConfirmImportModal: document.getElementById('btn-confirm-import-modal'),
+            btnCancelMacroModal: document.getElementById('btn-cancel-macro-modal'),
             inputImportSource: document.getElementById('import-source-name'),
             inputImportPackage: document.getElementById('import-package-name'),
             packageArea: document.getElementById('package-area'),
@@ -1171,6 +1187,55 @@
         function hideImportModal() {
           DOM.modalImport.classList.add('hidden');
         }
+      
+        function showMacroModal(macro) {
+            const area = document.getElementById('macro-area');
+            const btnRun = document.getElementById('btn-run-macro');
+            const permissions = [
+                ['env', '環境変数の読取'],
+                ['console_input', 'コンソールからの入力読取'],
+                ['stat', 'ファイル、フォルダ一覧の取得'],
+                ['file_open', '指定したファイルをアクティブにする'],
+                ['editor_read', 'アクティブなエディタのテキスト読取'],
+                ['editor_write', 'アクティブなエディタのテキスト書込'],
+                ['write', '指定したフォルダの作成、ファイルの上書き保存'],
+                ['sql_query', 'アクティブなSQLiteのクエリ実行'],
+                ['sql_commit', 'アクティブなSQLiteの保存'],
+                ['rich_console', 'リッチコンソール出力']
+            ];
+            area.innerHTML = "";
+          
+            area.append(
+                macro.name, document.createElement('br'),
+                "ファイルの場所：", macro.path, document.createElement('br'),
+                document.createElement('br'),
+                "権限：", document.createElement('br')
+            );
+            for (const [perm, desc] of permissions) {
+                if (macro.permissions.includes(perm)) {
+                    area.append(desc, document.createElement('br'));
+                }
+            }
+            area.append(
+                document.createElement('br'),
+                "許可された通信先：", document.createElement('br')
+            );
+            for (const allow of macro.allow) {
+                area.append(allow.pattern, document.createElement('br'));
+            }
+          
+            btnRun.onclick = () => {
+                hideMacroModal();
+                runMacro(macro.path);
+            };
+            DOM.modalMacro.classList.remove('hidden');
+        }
+      
+        function hideMacroModal() {
+            const btnRun = document.getElementById('btn-run-macro');
+            btnRun.onclick = null;
+            DOM.modalMacro.classList.add('hidden');
+        }
 
         function setCreateType(type) {
             state.createType = type;
@@ -1401,12 +1466,22 @@
       
                   // UIの生成
                   const item = document.createElement('div');
-                  item.className = 'p-2 bg-gray-700/50 rounded hover:bg-gray-600 cursor-pointer border border-transparent hover:border-green-500 group';
-                  item.innerHTML = `
-                      <div class="text-sm font-medium text-gray-200">${macro.name}</div>
-                      <div class="text-[10px] text-gray-500 truncate">${macro.permissions.join(', ') || 'no perms'}</div>
-                  `;
-                  item.onclick = () => runMacro(path);
+                  const nameArea = document.createElement('div');
+                  const btnArea = document.createElement('div');
+                  const btnInfo = document.createElement('button');
+                  const btnRun = document.createElement('button');
+                  item.classList.add('p-2', 'bg-gray-700/50', 'rounded', 'border', 'border-transparent', 'group');
+                  nameArea.classList.add('text-sm', 'font-medium', 'text-gray-200');
+                  nameArea.textContent = macro.name;
+                  btnArea.classList.add('flex', 'items-center', 'justify-end', 'gap-2');
+                  btnInfo.classList.add('bg-indigo-600', 'hover:bg-indigo-700', 'text-white', 'px-3', 'py-1', 'rounded', 'text-sm');
+                  btnInfo.textContent = '権限を確認';
+                  btnRun.classList.add('bg-blue-600', 'hover:bg-blue-700', 'text-white', 'px-3', 'py-1', 'rounded', 'text-sm');
+                  btnRun.textContent = '実行';
+                  btnArea.append(btnInfo, btnRun);
+                  item.append(nameArea, btnArea);
+                  btnRun.onclick = () => runMacro(path);
+                  btnInfo.onclick = () => showMacroModal(macro);
                   DOM.macroList.appendChild(item);
               } catch (e) {
                   console.error("Macro load error:", e);
@@ -1901,6 +1976,7 @@
             DOM.btnConsole.onclick = showConsoleModal;
             DOM.btnCancelConsoleModal.onclick = hideConsoleModal;
             DOM.btnClearConsole.onclick = clearConsole;
+            DOM.btnCancelMacroModal.onclick = hideMacroModal;
             
             DOM.typeFile.onclick = () => setCreateType('file');
             DOM.typeFolder.onclick = () => setCreateType('folder');
