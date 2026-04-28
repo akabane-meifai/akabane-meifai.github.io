@@ -1404,6 +1404,9 @@
           if (permissions.has('sql_commit')) {
             editoerMethods.push("commit(){ return this.request('sql_commit'); }");
           }
+          if (permissions.has('rich_console')) {
+            editoerMethods.push("mdLog(message) { return this.request('write_console', { text: message, type: 'md' }, (message instanceof ReadableStream) ? [message] : []); }");
+          }
           
           // Worker内ホワイトリスト
           const workerWhitelist1 = [
@@ -1414,6 +1417,7 @@
             'Int8Array', 'Int16Array', 'Int32Array', 'JSON', 'Map', 'Math',
             'MessagePort', 'Number', 'Object', 'Promise', 'Proxy', 'ReadableStream',
             'RegExp', 'Request', 'Response', 'Set', 'String', 'Symbol',
+            'TextDecoder', 'TextDecoderStream', 'TextEncoder', 'TextEncoderStream',
             'URL', 'Uint8Array', 'Uint8ClampedArray', 'Uint16Array', 'Uint32Array',
             'WeakMap', 'WeakRef', 'WeakSet', 'Editor'
           ].map(o => `case '${o}':`).join(" ");
@@ -1538,6 +1542,7 @@
                 }
               },
               async write_console({ text, type }) {
+                  if (type === 'md' && !permissions.has('rich_console')) throw "Permission denied: rich_console";
                   writeConsole(text, type, macroData);
               },
               request_input({ message, type, data }) {
@@ -1715,7 +1720,37 @@
           card.appendChild(msgContainer);
 
           DOM.ConsoleArea.appendChild(card);
-          if (data instanceof ReadableStream){
+          if (type === 'md') {
+              const richText = document.createElement('div');
+              richText.classList.add('markdown-body');
+              msgContainer.appendChild(richText);
+              if (typeof data === 'string') {
+                  richText.innerHTML = marked.parse(data);
+              } else if (data instanceof ReadableStream) {
+                  const m = new marked.Marked({ hooks: { provideLexer, provideParser } });
+                  const cache = [];
+                  data.pipeTo(new WritableStream({
+                      write(chunk) {
+                          m.parse(chunk);
+                      }
+                  }));
+                  function provideLexer(src, options) {
+                      const lexer = new marked.Lexer(options);
+                      return src => {
+                          const pre = cache.pop() ?? {raw: ''};
+                          cache.push(...lexer.lex(pre.raw + src));
+                          return cache;
+                      }
+                  }
+                  function provideParser(tokens, options) {
+                      const parser = new marked.Parser(options);
+                      let node = null;
+                      return tokens => {
+                          richText.innerHTML = parser.parse(tokens);
+                      }
+                  }
+              }
+          } else if (data instanceof ReadableStream){
               data.pipeTo(new WritableStream({ write }));
           } else {
               write(data);
